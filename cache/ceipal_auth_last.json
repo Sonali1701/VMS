@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-04-07T00:24:19.037479",
+  "status_code": 200,
+  "url": "https://api.ceipal.com/v1/createAuthtoken/",
+  "response": {
+    "_raw": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<root><access_token>eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjozOTE4MzMsInRoX2NvbXBhbnlfaWQiOjE0MTY3LCJlbWFpbF9pZCI6ImFtaXJAcmFkaXhzb2wuY29tIiwicGFzc3dvcmQiOiJkOGFiMjc3Nzk5OTNjNGY4YWY2NzM0OTgzZTY1ZDlhZDYyZTc2MzExMTAzOWU4OWMyZWU3MzI2OGJhOGUwNDhjIiwiZXhwIjoxNzc1NTA1MjU5LCJpYXQiOjE3NzU1MDE2NTl9.1w0ylULrykcXvnsMFf8dRcl63miarqFxOJJTjXobBOo</access_token><refresh_token>eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjozOTE4MzMsInRoX2NvbXBhbnlfaWQiOjE0MTY3LCJlbWFpbF9pZCI6ImFtaXJAcmFkaXhzb2wuY29tIiwicGFzc3dvcmQiOiJkOGFiMjc3Nzk5OTNjNGY4YWY2NzM0OTgzZTY1ZDlhZDYyZTc2MzExMTAzOWU4OWMyZWU3MzI2OGJhOGUwNDhjIiwiZXhwIjoxNzc2MTA2NDU5LCJpYXQiOjE3NzU1MDE2NTl9.BRVP4mF2HgrUOX2bsHefZTufjS18tyMRtvykcBDXJeA</refresh_token></root>"
+  }
+}

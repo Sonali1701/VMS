@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VMS - Vendor Management System</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand__logo">VMS</div>
+        <div class="brand__text">
+          <div class="brand__name">Vendor Management System</div>
+          <div class="brand__sub">Jobs & Submissions</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav__item nav__item--active" data-view="jobs">Jobs</button>
+        <button class="nav__item" data-view="submissions">Submissions</button>
+      </nav>
+
+      <div class="sidebar__footer">
+        <div class="status" id="systemStatus">
+          <div class="status__dot status__dot--warn"></div>
+          <div class="status__text">Checking Ceipal…</div>
+        </div>
+        <div class="meta" id="apiBase">API: http://localhost:8000</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 class="title" id="pageTitle">Jobs</h1>
+          <div class="subtitle" id="pageSubtitle">Browse open roles and submit resumes per job.</div>
+        </div>
+        <div class="topbar__actions">
+          <button class="btn btn--secondary" id="refreshBtn">Refresh</button>
+          <button class="btn" id="ceipalCacheBtn">Ceipal Cache</button>
+        </div>
+      </header>
+
+      <section class="content" id="viewJobs">
+        <div class="filters">
+          <div class="field">
+            <label>Search</label>
+            <input id="searchInput" class="input" placeholder="Search by title, department, location…" />
+          </div>
+          <div class="field">
+            <label>Status</label>
+            <select id="statusFilter" class="input">
+              <option value="">All</option>
+              <option value="active">Active</option>
+              <option value="open">Open</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid" id="jobsGrid"></div>
+        <div class="empty" id="jobsEmpty" hidden>No jobs found.</div>
+      </section>
+
+      <section class="content" id="viewSubmissions" hidden>
+        <div class="panel">
+          <div class="panel__title">Candidate Submissions</div>
+          <div class="panel__desc">Shows submissions stored by backend (in-memory in this version).</div>
+          <div id="submissionsTable"></div>
+        </div>
+      </section>
+
+      <section class="content" id="viewSettings" hidden>
+        <div class="panel">
+          <div class="panel__title">System</div>
+          <div class="panel__desc">Ceipal connectivity and cached raw responses.</div>
+          <div class="row">
+            <button class="btn" id="ceipalTestBtn">Test Ceipal Auth</button>
+            <button class="btn btn--secondary" id="openDocsBtn">API Docs</button>
+          </div>
+          <pre class="code" id="systemJson">Loading…</pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Job Detail Modal -->
+  <div class="modal" id="jobDetailModal" hidden>
+    <div class="modal__backdrop" data-close="jobDetail"></div>
+    <div class="modal__card">
+      <div class="modal__header">
+        <div class="modal__title" id="jobDetailTitle">Job Details</div>
+        <button class="icon-btn" type="button" data-close="jobDetail">✕</button>
+      </div>
+      <div class="modal__body">
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel__title" id="jobDetailJobTitle">Selected job</div>
+          <div class="panel__desc" id="jobDetailMeta">—</div>
+        </div>
+
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel__title">Job Description</div>
+          <div class="panel__desc" id="jobDetailFullDesc">No description available.</div>
+        </div>
+
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel__title">Requirements</div>
+          <div class="panel__desc" id="jobDetailRequirements">No requirements specified.</div>
+        </div>
+
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel__title">Existing submissions for this job</div>
+          <pre class="code" id="jobDetailCandidates" style="margin-top: 10px;">Loading…</pre>
+        </div>
+
+        <div class="row row--right">
+          <button class="btn btn--secondary" type="button" data-close="jobDetail">Close</button>
+          <button class="btn" type="button" id="jobDetailSubmitBtn">Submit Resume for this Job</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Submit Resume Modal -->
+  <div class="modal" id="submitModal" hidden>
+    <div class="modal__backdrop" data-close="submit"></div>
+    <div class="modal__card">
+      <div class="modal__header">
+        <div class="modal__title" id="submitModalTitle">Submit Resume</div>
+        <button class="icon-btn" type="button" data-close="submit">✕</button>
+      </div>
+      <div class="modal__body">
+        <div class="panel" style="margin-bottom: 12px;">
+          <div class="panel__title" id="submitJobTitle">Selected job</div>
+          <div class="panel__desc" id="submitJobMeta">—</div>
+        </div>
+
+        <div class="form">
+          <div class="form__row">
+            <div class="field">
+              <label>Candidate name</label>
+              <input id="candName" class="input" placeholder="Full name" />
+            </div>
+            <div class="field">
+              <label>Email</label>
+              <input id="candEmail" class="input" placeholder="name@example.com" />
+            </div>
+          </div>
+          <div class="form__row">
+            <div class="field">
+              <label>Phone (optional)</label>
+              <input id="candPhone" class="input" placeholder="+91…" />
+            </div>
+            <div class="field">
+              <label>Resume</label>
+              <input id="candResume" class="input" type="file" accept=".pdf,.doc,.docx,.txt" />
+            </div>
+          </div>
+          <div class="alert" id="formAlert" hidden></div>
+          <div class="row row--right">
+            <button class="btn btn--secondary" type="button" data-close="submit">Cancel</button>
+            <button class="btn btn--secondary" type="button" id="submitAnotherBtn">Submit & Add Another</button>
+            <button class="btn" type="button" id="submitCloseBtn">Submit & Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>

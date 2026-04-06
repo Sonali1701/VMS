@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+streamlit
+sqlalchemy
+alembic
+pydantic
+python-multipart
+aiofiles
+httpx
+python-dotenv
+pandas
+plotly
+jinja2
