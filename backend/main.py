@@ -15,7 +15,7 @@ import re
 from sqlalchemy import create_engine, Column, String, DateTime, Integer, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
-from passlib.context import CryptContext
+import bcrypt
 from jose import JWTError, jwt
 from uuid import uuid4
 
@@ -40,8 +40,24 @@ SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Password hashing - use bcrypt directly (passlib incompatible with bcrypt 4.x)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # bcrypt has 72-byte limit, truncate if necessary
+    password_bytes = plain_password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password_bytes = password_bytes[:72]
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hashed_bytes)
+
+def get_password_hash(password: str) -> str:
+    # bcrypt has 72-byte limit, truncate if necessary
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password_bytes = password_bytes[:72]
+    hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt())
+    return hashed.decode('utf-8')
+
 
 # Database Models
 class UserDB(Base):
@@ -207,20 +223,7 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     email: Optional[str] = None
 
-# Auth Utility Functions
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    # bcrypt has 72-byte limit, truncate if necessary
-    password_bytes = plain_password.encode('utf-8')
-    if len(password_bytes) > 72:
-        password_bytes = password_bytes[:72]
-    return pwd_context.verify(password_bytes.decode('utf-8', errors='ignore'), hashed_password)
-
-def get_password_hash(password: str) -> str:
-    # bcrypt has 72-byte limit, truncate if necessary
-    password_bytes = password.encode('utf-8')
-    if len(password_bytes) > 72:
-        password_bytes = password_bytes[:72]
-    return pwd_context.hash(password_bytes.decode('utf-8', errors='ignore'))
+# Auth Utility Functions - now using bcrypt directly (defined above)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
