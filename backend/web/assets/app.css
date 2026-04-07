@@ -222,3 +222,15 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px; }
 th { border-bottom: 1px solid var(--border); font-weight: 600; color: var(--muted); }
 tbody tr:hover { background: var(--panel-2); }
+
+.loading-jobs {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 16px;
+  white-space: nowrap;
+}
+.loading-jobs small {
+  color: #888;
+  font-size: 14px;
+}
