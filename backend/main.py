@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, status, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPBearer, HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
@@ -12,9 +12,12 @@ import aiofiles
 import json
 from dotenv import load_dotenv
 import re
-from sqlalchemy import create_engine, Column, String, DateTime, Integer
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, relationship
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from uuid import uuid4
 
 # Load environment variables
 load_dotenv()
@@ -32,27 +35,51 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} i
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# JWT Configuration
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 # Database Models
+class UserDB(Base):
+    __tablename__ = "users"
+    
+    id = Column(String, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    full_name = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    is_active = Column(String, default="true")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    submissions = relationship("CandidateDB", back_populates="submitted_by")
+
 class CandidateDB(Base):
     __tablename__ = "candidates"
     
     id = Column(String, primary_key=True, index=True)
     name = Column(String, nullable=False)
     email = Column(String, nullable=False)
-    phone = Column(String, nullable=True)
+    phone = Column(String, nullable=False)
     job_id = Column(String, nullable=False)
     resume_path = Column(String, nullable=False)
     submitted_date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="submitted")
-    # New fields
-    bill_rate = Column(String, nullable=True)
-    current_location = Column(String, nullable=True)
-    primary_skills = Column(String, nullable=True)
-    job_title = Column(String, nullable=True)
-    years_experience = Column(String, nullable=True)
-    tentative_start_date = Column(String, nullable=True)
-    rto = Column(String, nullable=True)
-    candidate_summary = Column(String, nullable=True)
+    # Track who submitted this candidate
+    submitted_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    submitted_by = relationship("UserDB", back_populates="submissions")
+    # New fields - all required
+    bill_rate = Column(String, nullable=False)
+    current_location = Column(String, nullable=False)
+    primary_skills = Column(String, nullable=False)
+    job_title = Column(String, nullable=False)
+    years_experience = Column(String, nullable=False)
+    tentative_start_date = Column(String, nullable=False)
+    rto = Column(String, nullable=False)
+    candidate_summary = Column(String, nullable=False)
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -144,6 +171,149 @@ class CandidateSubmission(BaseModel):
     email: str
     phone: Optional[str] = None
     job_id: str
+
+# Auth Pydantic Models
+class UserCreate(BaseModel):
+    email: str
+    full_name: str
+    password: str
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    is_active: str
+    created_at: datetime
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+
+# Auth Utility Functions
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(HTTPBearer()), db: Session = Depends(get_db)) -> UserDB:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenData(email=email)
+    except JWTError:
+        raise credentials_exception
+    
+    user = db.query(UserDB).filter(UserDB.email == token_data.email).first()
+    if user is None:
+        raise credentials_exception
+    if user.is_active != "true":
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return user
+
+# Auth Endpoints
+@app.post("/api/auth/register", response_model=Token)
+async def register(user_data: UserCreate, db: Session = Depends(get_db)):
+    """Register a new user"""
+    # Check if user already exists
+    existing_user = db.query(UserDB).filter(UserDB.email == user_data.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create new user
+    user_id = str(uuid4())
+    hashed_password = get_password_hash(user_data.password)
+    
+    db_user = UserDB(
+        id=user_id,
+        email=user_data.email,
+        full_name=user_data.full_name,
+        hashed_password=hashed_password,
+        is_active="true"
+    )
+    
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    
+    # Create access token
+    access_token = create_access_token(data={"sub": db_user.email})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": db_user.id,
+            "email": db_user.email,
+            "full_name": db_user.full_name,
+            "is_active": db_user.is_active,
+            "created_at": db_user.created_at
+        }
+    }
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(user_data: UserLogin, db: Session = Depends(get_db)):
+    """Login user and return JWT token"""
+    user = db.query(UserDB).filter(UserDB.email == user_data.email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    
+    if not verify_password(user_data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    
+    if user.is_active != "true":
+        raise HTTPException(status_code=400, detail="Inactive user")
+    
+    # Create access token
+    access_token = create_access_token(data={"sub": user.email})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_active": user.is_active,
+            "created_at": user.created_at
+        }
+    }
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: UserDB = Depends(get_current_user)):
+    """Get current logged in user info"""
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at
+    }
 
 # Serve uploaded resumes statically
 if os.path.isdir(UPLOAD_DIR):
@@ -627,20 +797,21 @@ async def get_ceipal_reports():
 async def submit_candidate(
     candidate_name: str = Form(...),
     email: str = Form(...), 
-    phone: Optional[str] = Form(None),
-    bill_rate: Optional[str] = Form(None),
-    current_location: Optional[str] = Form(None),
-    primary_skills: Optional[str] = Form(None),
-    job_title: Optional[str] = Form(None),
-    years_experience: Optional[str] = Form(None),
-    tentative_start_date: Optional[str] = Form(None),
-    rto: Optional[str] = Form(None),
-    candidate_summary: Optional[str] = Form(None),
+    phone: str = Form(...),
+    bill_rate: str = Form(...),
+    current_location: str = Form(...),
+    primary_skills: str = Form(...),
+    job_title: str = Form(...),
+    years_experience: str = Form(...),
+    tentative_start_date: str = Form(...),
+    rto: str = Form(...),
+    candidate_summary: str = Form(...),
     job_id: str = Form(...),
     resume: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user)
 ):
-    """Submit candidate resume for a job"""
+    """Submit candidate resume for a job (requires authentication)"""
     try:
         # Validate file
         if resume.size > MAX_FILE_SIZE:
@@ -664,7 +835,7 @@ async def submit_candidate(
         count = db.query(CandidateDB).count()
         candidate_id = f"candidate_{count + 1}"
         
-        # Store candidate in database
+        # Store candidate in database with submitter info
         db_candidate = CandidateDB(
             id=candidate_id,
             name=candidate_name,
@@ -674,6 +845,7 @@ async def submit_candidate(
             resume_path=file_path,
             submitted_date=datetime.now(),
             status="submitted",
+            submitted_by_user_id=current_user.id,  # Track who submitted
             bill_rate=bill_rate,
             current_location=current_location,
             primary_skills=primary_skills,
@@ -690,7 +862,8 @@ async def submit_candidate(
         return {
             "message": "Candidate submitted successfully",
             "candidate_id": candidate_id,
-            "status": "submitted"
+            "status": "submitted",
+            "submitted_by": current_user.full_name
         }
         
     except Exception as e:
@@ -708,10 +881,40 @@ async def get_candidates_for_job(job_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/candidates")
 async def get_all_candidates(db: Session = Depends(get_db)):
-    """Get all submitted candidates"""
+    """Get all submitted candidates with submitter info"""
     try:
-        candidates = db.query(CandidateDB).all()
-        return {"candidates": candidates, "total": len(candidates)}
+        from sqlalchemy.orm import joinedload
+        candidates = db.query(CandidateDB).options(joinedload(CandidateDB.submitted_by)).all()
+        
+        result = []
+        for c in candidates:
+            candidate_dict = {
+                "id": c.id,
+                "name": c.name,
+                "email": c.email,
+                "phone": c.phone,
+                "job_id": c.job_id,
+                "resume_path": c.resume_path,
+                "submitted_date": c.submitted_date,
+                "status": c.status,
+                "bill_rate": c.bill_rate,
+                "current_location": c.current_location,
+                "primary_skills": c.primary_skills,
+                "job_title": c.job_title,
+                "years_experience": c.years_experience,
+                "tentative_start_date": c.tentative_start_date,
+                "rto": c.rto,
+                "candidate_summary": c.candidate_summary,
+                "submitted_by_user_id": c.submitted_by_user_id,
+                "submitted_by": {
+                    "id": c.submitted_by.id,
+                    "full_name": c.submitted_by.full_name,
+                    "email": c.submitted_by.email
+                } if c.submitted_by else None
+            }
+            result.append(candidate_dict)
+        
+        return {"candidates": result, "total": len(result)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
 

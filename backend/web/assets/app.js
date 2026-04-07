@@ -17,7 +17,20 @@ const els = {
   viewJobs: document.getElementById('viewJobs'),
   viewSubmissions: document.getElementById('viewSubmissions'),
   viewSettings: document.getElementById('viewSettings'),
+  viewAuth: document.getElementById('viewAuth'),
   submissionsTable: document.getElementById('submissionsTable'),
+  // Auth elements
+  userInfo: document.getElementById('userInfo'),
+  userName: document.getElementById('userName'),
+  logoutBtn: document.getElementById('logoutBtn'),
+  authTitle: document.getElementById('authTitle'),
+  authEmail: document.getElementById('authEmail'),
+  authPassword: document.getElementById('authPassword'),
+  authFullName: document.getElementById('authFullName'),
+  registerFields: document.getElementById('registerFields'),
+  authSubmitBtn: document.getElementById('authSubmitBtn'),
+  authToggleBtn: document.getElementById('authToggleBtn'),
+  authAlert: document.getElementById('authAlert'),
   // Job Detail Modal
   jobDetailModal: document.getElementById('jobDetailModal'),
   jobDetailTitle: document.getElementById('jobDetailTitle'),
@@ -54,6 +67,134 @@ els.apiBase.textContent = `API: ${API_BASE}`;
 let allJobs = [];
 let activeJobId = null;
 let activeJob = null;
+
+// Auth state
+let authToken = localStorage.getItem('vms_token') || null;
+let currentUser = JSON.parse(localStorage.getItem('vms_user') || 'null');
+let isRegisterMode = false;
+
+function showAuthAlert(kind, msg) {
+  els.authAlert.hidden = false;
+  els.authAlert.className = `alert ${kind === 'ok' ? 'alert--ok' : 'alert--error'}`;
+  els.authAlert.textContent = msg;
+}
+
+function clearAuthAlert() {
+  els.authAlert.hidden = true;
+  els.authAlert.textContent = '';
+}
+
+function updateAuthUI() {
+  if (authToken && currentUser) {
+    // Logged in - show user info and logout
+    els.userInfo.hidden = false;
+    els.userName.textContent = currentUser.full_name || currentUser.email;
+    els.viewAuth.hidden = true;
+    els.viewJobs.hidden = false;
+  } else {
+    // Not logged in - show auth form
+    els.userInfo.hidden = true;
+    els.viewAuth.hidden = false;
+    els.viewJobs.hidden = true;
+    els.viewSubmissions.hidden = true;
+    els.viewSettings.hidden = true;
+  }
+}
+
+function logout() {
+  authToken = null;
+  currentUser = null;
+  localStorage.removeItem('vms_token');
+  localStorage.removeItem('vms_user');
+  updateAuthUI();
+}
+
+function toggleAuthMode() {
+  isRegisterMode = !isRegisterMode;
+  els.authTitle.textContent = isRegisterMode ? 'Register' : 'Login';
+  els.authSubmitBtn.textContent = isRegisterMode ? 'Register' : 'Login';
+  els.authToggleBtn.textContent = isRegisterMode ? 'Back to Login' : 'Register';
+  els.registerFields.hidden = !isRegisterMode;
+  clearAuthAlert();
+}
+
+async function handleAuthSubmit() {
+  clearAuthAlert();
+  
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  
+  if (!email) return showAuthAlert('error', 'Email is required');
+  if (!password) return showAuthAlert('error', 'Password is required');
+  
+  const body = isRegisterMode 
+    ? { email, password, full_name: els.authFullName.value.trim() }
+    : { email, password };
+  
+  const endpoint = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
+  
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.detail || 'Authentication failed');
+    }
+    
+    // Store token and user
+    authToken = data.access_token;
+    currentUser = data.user;
+    localStorage.setItem('vms_token', authToken);
+    localStorage.setItem('vms_user', JSON.stringify(currentUser));
+    
+    // Clear form
+    els.authEmail.value = '';
+    els.authPassword.value = '';
+    els.authFullName.value = '';
+    
+    updateAuthUI();
+    await loadCeipalStatus();
+    await loadJobs();
+    
+  } catch (e) {
+    showAuthAlert('error', e.message);
+  }
+}
+
+// Modified API function that includes auth token
+async function apiPostFormAuth(path, formData) {
+  const headers = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  
+  const res = await fetch(`${API_BASE}${path}`, { 
+    method: 'POST', 
+    body: formData,
+    headers
+  });
+  
+  if (res.status === 401) {
+    // Token expired or invalid
+    logout();
+    throw new Error('Session expired. Please login again.');
+  }
+  
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { _raw: text }; }
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.data = json;
+    throw err;
+  }
+  return json;
+}
 
 function setStatus(kind, text) {
   const dot = els.systemStatus.querySelector('.status__dot');
@@ -170,10 +311,15 @@ function setView(view) {
     btn.classList.toggle('nav__item--active', btn.dataset.view === view);
   });
 
+  els.viewAuth.hidden = view !== 'auth';
   els.viewJobs.hidden = view !== 'jobs';
   els.viewSubmissions.hidden = view !== 'submissions';
   els.viewSettings.hidden = view !== 'settings';
 
+  if (view === 'auth') {
+    els.pageTitle.textContent = 'Authentication';
+    els.pageSubtitle.textContent = 'Please login or register to continue.';
+  }
   if (view === 'jobs') {
     els.pageTitle.textContent = 'Jobs';
     els.pageSubtitle.textContent = 'Browse open roles and submit resumes per job.';
@@ -330,13 +476,22 @@ async function submitResume({ closeAfter }) {
   const jobTitle = els.candJobTitle.value.trim();
   const experience = els.candExperience.value.trim();
   const startDate = els.candStartDate.value;
-  const rto = els.candRTO.value;
+  const rto = els.candRTO.value.trim();
   const summary = els.candSummary.value.trim();
   const file = els.candResume.files && els.candResume.files[0];
 
   if (!activeJobId) return showAlert('error', 'No job selected.');
   if (!name) return showAlert('error', 'Candidate name is required.');
   if (!email) return showAlert('error', 'Email is required.');
+  if (!phone) return showAlert('error', 'Phone is required.');
+  if (!billRate) return showAlert('error', 'Bill Rate is required.');
+  if (!location) return showAlert('error', 'Current Location is required.');
+  if (!skills) return showAlert('error', 'Primary Skills is required.');
+  if (!jobTitle) return showAlert('error', 'Job Title is required.');
+  if (!experience) return showAlert('error', 'Years of Experience is required.');
+  if (!startDate) return showAlert('error', 'Tentative Start Date is required.');
+  if (!rto) return showAlert('error', 'RTO is required.');
+  if (!summary) return showAlert('error', 'Candidate Summary is required.');
   if (!file) return showAlert('error', 'Resume file is required.');
 
   const fd = new FormData();
@@ -360,8 +515,8 @@ async function submitResume({ closeAfter }) {
   if (els.submitCloseBtn) els.submitCloseBtn.textContent = 'Submitting…';
 
   try {
-    const res = await apiPostForm('/api/candidates/submit', fd);
-    showAlert('ok', `Submitted successfully. Candidate ID: ${res.candidate_id || 'N/A'}`);
+    const res = await apiPostFormAuth('/api/candidates/submit', fd);
+    showAlert('ok', `Submitted successfully by ${res.submitted_by || 'you'}. Candidate ID: ${res.candidate_id || 'N/A'}`);
     if (closeAfter) {
       setTimeout(() => closeSubmitModal(), 650);
     } else {
@@ -454,6 +609,7 @@ async function loadSubmissions() {
         <td>${c.email || ''}</td>
         <td>${c.phone || ''}</td>
         <td>${c.job_id || ''}</td>
+        <td>${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</td>
         <td>${c.submitted_date || ''}</td>
         <td>${c.status || ''}</td>
         <td><button class="btn btn--secondary view-resume-btn" data-path="${c.resume_path || ''}">View Resume</button></td>
@@ -473,6 +629,7 @@ async function loadSubmissions() {
                 <th>Email</th>
                 <th>Phone</th>
                 <th>Job</th>
+                <th>Submitted By</th>
                 <th>Submitted</th>
                 <th>Status</th>
                 <th>Resume</th>
@@ -538,9 +695,29 @@ document.querySelectorAll('.nav__item').forEach(btn => {
   btn.addEventListener('click', () => setView(btn.dataset.view));
 });
 
+if (els.logoutBtn) {
+  els.logoutBtn.addEventListener('click', logout);
+}
+
+if (els.authSubmitBtn) {
+  els.authSubmitBtn.addEventListener('click', handleAuthSubmit);
+}
+
+if (els.authToggleBtn) {
+  els.authToggleBtn.addEventListener('click', toggleAuthMode);
+}
+
 // init
 (async function init() {
-  setView('jobs');
-  await loadCeipalStatus();
-  await loadJobs();
+  updateAuthUI();
+  
+  if (authToken && currentUser) {
+    // Already logged in
+    setView('jobs');
+    await loadCeipalStatus();
+    await loadJobs();
+  } else {
+    // Not logged in - show auth view
+    setView('auth');
+  }
 })();

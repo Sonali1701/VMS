@@ -11,3 +11,5 @@ python-dotenv
 pandas
 plotly
 jinja2
+passlib[bcrypt]
+python-jose[cryptography]
