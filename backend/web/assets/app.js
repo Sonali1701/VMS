@@ -361,7 +361,7 @@ if (els.submitCloseBtn) {
 }
 
 async function loadJobs() {
-  els.jobsGrid.innerHTML = '';
+  els.jobsGrid.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Loading jobs from Ceipal API... <span class="spinner">Please wait, this may take up to a minute on first load</span></div>';
   els.jobsEmpty.hidden = true;
   try {
     const data = await apiGet('/api/jobs');

@@ -152,7 +152,22 @@ class CeipalClient:
         self.token_expires = None
         self.cache_dir = CEIPAL_CACHE_DIR
         self.last_auth_error = None
+        self._jobs_cache = None
+        self._jobs_cache_time = None
         os.makedirs(self.cache_dir, exist_ok=True)
+
+    def _get_cached_jobs(self) -> Optional[List[Job]]:
+        """Return cached jobs if less than 15 minutes old"""
+        if self._jobs_cache and self._jobs_cache_time:
+            age = datetime.now() - self._jobs_cache_time
+            if age < timedelta(minutes=15):
+                return self._jobs_cache
+        return None
+
+    def _set_cached_jobs(self, jobs: List[Job]):
+        """Cache jobs with timestamp"""
+        self._jobs_cache = jobs
+        self._jobs_cache_time = datetime.now()
 
     def _cache_path(self, filename: str) -> str:
         return os.path.join(self.cache_dir, filename)
@@ -286,7 +301,12 @@ class CeipalClient:
         return self.auth_token
     
     async def fetch_jobs(self) -> List[Job]:
-        """Fetch all jobs from Ceipal Reports API with pagination support"""
+        """Fetch all jobs from Ceipal Reports API with pagination support and caching"""
+        # Check cache first
+        cached_jobs = self._get_cached_jobs()
+        if cached_jobs:
+            return cached_jobs
+        
         all_jobs: List[Job] = []
         
         try:
@@ -338,6 +358,8 @@ class CeipalClient:
                     
                     page += 1
                 
+                # Cache the results
+                self._set_cached_jobs(all_jobs)
                 return all_jobs
                 
         except httpx.HTTPError as e:
