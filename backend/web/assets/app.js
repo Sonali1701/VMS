@@ -140,10 +140,17 @@ async function handleAuthSubmit() {
       body: JSON.stringify(body)
     });
     
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Server returned HTML error page
+      throw new Error(text.includes('Internal Server Error') ? 'Server error. Please try again.' : text.slice(0, 100));
+    }
     
     if (!res.ok) {
-      throw new Error(data.detail || 'Authentication failed');
+      throw new Error(data.detail || data.message || `Error: ${res.status}`);
     }
     
     // Store token and user
@@ -157,9 +164,15 @@ async function handleAuthSubmit() {
     els.authPassword.value = '';
     els.authFullName.value = '';
     
-    updateAuthUI();
-    await loadCeipalStatus();
-    await loadJobs();
+    // Show success message briefly then switch to jobs
+    showAuthAlert('ok', isRegisterMode ? 'Registered successfully!' : 'Logged in successfully!');
+    
+    setTimeout(async () => {
+      updateAuthUI();
+      setView('jobs');  // Redirect to VMS interface
+      await loadCeipalStatus();
+      await loadJobs();
+    }, 800);
     
   } catch (e) {
     showAuthAlert('error', e.message);
