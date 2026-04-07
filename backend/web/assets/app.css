@@ -234,3 +234,59 @@ tbody tr:hover { background: var(--panel-2); }
   color: #888;
   font-size: 14px;
 }
+
+/* Auth overlay - full screen centered */
+#viewAuth {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  z-index: 1000;
+}
+
+#viewAuth .panel {
+  width: 100%;
+  max-width: 400px;
+  margin: 20px;
+  background: white;
+  box-shadow: 0 25px 80px rgba(0,0,0,0.3);
+  border: none;
+  border-radius: 20px;
+  padding: 32px;
+}
+
+#viewAuth .panel__title {
+  font-size: 24px;
+  margin-bottom: 6px;
+  color: #1e293b;
+}
+
+#viewAuth .panel__desc {
+  font-size: 14px;
+  color: #64748b;
+  margin-bottom: 24px;
+}
+
+#viewAuth .field {
+  margin-bottom: 12px;
+}
+
+#viewAuth .input {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+
+#viewAuth .input:focus {
+  background: white;
+  border-color: #7c3aed;
+}
+
+#viewAuth .btn {
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-weight: 600;
+}
