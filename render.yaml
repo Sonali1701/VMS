@@ -5,7 +5,8 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: |
       mkdir -p /data/uploads /data/cache
-      uvicorn backend.main:app --host 0.0.0.0 --port 8000
+      cd /opt/render/project/src
+      uvicorn backend.main:app --host 0.0.0.0 --port 8000 --app-dir .
     envVars:
       - key: PYTHON_VERSION
         value: 3.11
