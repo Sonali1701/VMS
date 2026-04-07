@@ -4,19 +4,18 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: |
-      mkdir -p /data/uploads /data/cache
-      cd /opt/render/project/src
-      uvicorn backend.main:app --host 0.0.0.0 --port 8000 --app-dir .
+      mkdir -p data/uploads data/cache
+      uvicorn backend.main:app --host 0.0.0.0 --port 8000
     envVars:
       - key: PYTHON_VERSION
         value: 3.11
       - key: UPLOAD_DIR
-        value: /data/uploads
+        value: ./data/uploads
       - key: CEIPAL_CACHE_DIR
-        value: /data/cache
+        value: ./data/cache
       - key: MAX_FILE_SIZE
         value: 10485760
     disk:
       name: data
-      mountPath: /data
+      mountPath: /opt/render/project/src/data
       sizeGB: 1
