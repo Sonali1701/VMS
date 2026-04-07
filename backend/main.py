@@ -81,6 +81,13 @@ class CandidateDB(Base):
     rto = Column(String, nullable=False)
     candidate_summary = Column(String, nullable=False)
 
+# Optional: Delete old database on startup (for Render migration)
+if os.getenv("DELETE_DB_ON_START") == "true":
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if os.path.exists(db_path):
+        os.remove(db_path)
+        print(f"[MIGRATION] Deleted old database: {db_path}")
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
