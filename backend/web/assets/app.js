@@ -35,6 +35,14 @@ const els = {
   candName: document.getElementById('candName'),
   candEmail: document.getElementById('candEmail'),
   candPhone: document.getElementById('candPhone'),
+  candBillRate: document.getElementById('candBillRate'),
+  candLocation: document.getElementById('candLocation'),
+  candSkills: document.getElementById('candSkills'),
+  candJobTitle: document.getElementById('candJobTitle'),
+  candExperience: document.getElementById('candExperience'),
+  candStartDate: document.getElementById('candStartDate'),
+  candRTO: document.getElementById('candRTO'),
+  candSummary: document.getElementById('candSummary'),
   candResume: document.getElementById('candResume'),
   submitAnotherBtn: document.getElementById('submitAnotherBtn'),
   submitCloseBtn: document.getElementById('submitCloseBtn'),
@@ -232,9 +240,18 @@ function openSubmitModal(job) {
   ].filter(Boolean);
   els.submitJobMeta.textContent = parts.join(' • ') || '—';
   
+  // Clear all fields
   els.candName.value = '';
   els.candEmail.value = '';
   els.candPhone.value = '';
+  els.candBillRate.value = '';
+  els.candLocation.value = '';
+  els.candSkills.value = '';
+  els.candJobTitle.value = '';
+  els.candExperience.value = '';
+  els.candStartDate.value = '';
+  els.candRTO.value = '';
+  els.candSummary.value = '';
   els.candResume.value = '';
   clearAlert();
   els.submitModal.hidden = false;
@@ -307,6 +324,14 @@ async function submitResume({ closeAfter }) {
   const name = els.candName.value.trim();
   const email = els.candEmail.value.trim();
   const phone = els.candPhone.value.trim();
+  const billRate = els.candBillRate.value.trim();
+  const location = els.candLocation.value.trim();
+  const skills = els.candSkills.value.trim();
+  const jobTitle = els.candJobTitle.value.trim();
+  const experience = els.candExperience.value.trim();
+  const startDate = els.candStartDate.value;
+  const rto = els.candRTO.value;
+  const summary = els.candSummary.value.trim();
   const file = els.candResume.files && els.candResume.files[0];
 
   if (!activeJobId) return showAlert('error', 'No job selected.');
@@ -318,6 +343,14 @@ async function submitResume({ closeAfter }) {
   fd.append('candidate_name', name);
   fd.append('email', email);
   fd.append('phone', phone);
+  fd.append('bill_rate', billRate);
+  fd.append('current_location', location);
+  fd.append('primary_skills', skills);
+  fd.append('job_title', jobTitle);
+  fd.append('years_experience', experience);
+  fd.append('tentative_start_date', startDate);
+  fd.append('rto', rto);
+  fd.append('candidate_summary', summary);
   fd.append('job_id', activeJobId);
   fd.append('resume', file);
 
@@ -336,6 +369,14 @@ async function submitResume({ closeAfter }) {
       els.candName.value = '';
       els.candEmail.value = '';
       els.candPhone.value = '';
+      els.candBillRate.value = '';
+      els.candLocation.value = '';
+      els.candSkills.value = '';
+      els.candJobTitle.value = '';
+      els.candExperience.value = '';
+      els.candStartDate.value = '';
+      els.candRTO.value = '';
+      els.candSummary.value = '';
       els.candResume.value = '';
     }
   } catch (e) {

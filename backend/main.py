@@ -44,6 +44,15 @@ class CandidateDB(Base):
     resume_path = Column(String, nullable=False)
     submitted_date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="submitted")
+    # New fields
+    bill_rate = Column(String, nullable=True)
+    current_location = Column(String, nullable=True)
+    primary_skills = Column(String, nullable=True)
+    job_title = Column(String, nullable=True)
+    years_experience = Column(String, nullable=True)
+    tentative_start_date = Column(String, nullable=True)
+    rto = Column(String, nullable=True)
+    candidate_summary = Column(String, nullable=True)
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -619,6 +628,14 @@ async def submit_candidate(
     candidate_name: str = Form(...),
     email: str = Form(...), 
     phone: Optional[str] = Form(None),
+    bill_rate: Optional[str] = Form(None),
+    current_location: Optional[str] = Form(None),
+    primary_skills: Optional[str] = Form(None),
+    job_title: Optional[str] = Form(None),
+    years_experience: Optional[str] = Form(None),
+    tentative_start_date: Optional[str] = Form(None),
+    rto: Optional[str] = Form(None),
+    candidate_summary: Optional[str] = Form(None),
     job_id: str = Form(...),
     resume: UploadFile = File(...),
     db: Session = Depends(get_db)
@@ -656,7 +673,15 @@ async def submit_candidate(
             job_id=job_id,
             resume_path=file_path,
             submitted_date=datetime.now(),
-            status="submitted"
+            status="submitted",
+            bill_rate=bill_rate,
+            current_location=current_location,
+            primary_skills=primary_skills,
+            job_title=job_title,
+            years_experience=years_experience,
+            tentative_start_date=tentative_start_date,
+            rto=rto,
+            candidate_summary=candidate_summary
         )
         db.add(db_candidate)
         db.commit()

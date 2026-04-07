@@ -139,11 +139,11 @@
         <div class="form">
           <div class="form__row">
             <div class="field">
-              <label>Candidate name</label>
+              <label>Candidate name *</label>
               <input id="candName" class="input" placeholder="Full name" />
             </div>
             <div class="field">
-              <label>Email</label>
+              <label>Email *</label>
               <input id="candEmail" class="input" placeholder="name@example.com" />
             </div>
           </div>
@@ -153,7 +153,55 @@
               <input id="candPhone" class="input" placeholder="+91…" />
             </div>
             <div class="field">
-              <label>Resume</label>
+              <label>Bill Rate (optional)</label>
+              <input id="candBillRate" class="input" placeholder="e.g. $50/hr or $100K/year" />
+            </div>
+          </div>
+          <div class="form__row">
+            <div class="field">
+              <label>Current Location (optional)</label>
+              <input id="candLocation" class="input" placeholder="City, State" />
+            </div>
+            <div class="field">
+              <label>Primary Skills (optional)</label>
+              <input id="candSkills" class="input" placeholder="e.g. Python, React, SQL" />
+            </div>
+          </div>
+          <div class="form__row">
+            <div class="field">
+              <label>Job Title (optional)</label>
+              <input id="candJobTitle" class="input" placeholder="Candidate's current/preferred title" />
+            </div>
+            <div class="field">
+              <label>Years of Experience (optional)</label>
+              <input id="candExperience" class="input" placeholder="e.g. 5 years" />
+            </div>
+          </div>
+          <div class="form__row">
+            <div class="field">
+              <label>Tentative Start Date (optional)</label>
+              <input id="candStartDate" class="input" type="date" />
+            </div>
+            <div class="field">
+              <label>RTO (Return to Office) (optional)</label>
+              <select id="candRTO" class="input">
+                <option value="">Select RTO status</option>
+                <option value="remote">Fully Remote</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="onsite">On-site</option>
+                <option value="flexible">Flexible</option>
+              </select>
+            </div>
+          </div>
+          <div class="form__row">
+            <div class="field" style="grid-column: 1 / -1;">
+              <label>Candidate Summary (optional)</label>
+              <textarea id="candSummary" class="input" rows="3" placeholder="Brief summary of candidate's background, strengths, and fit for the role..."></textarea>
+            </div>
+          </div>
+          <div class="form__row">
+            <div class="field">
+              <label>Resume *</label>
               <input id="candResume" class="input" type="file" accept=".pdf,.doc,.docx,.txt" />
             </div>
           </div>
