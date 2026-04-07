@@ -12,9 +12,49 @@ import aiofiles
 import json
 from dotenv import load_dotenv
 import re
+from sqlalchemy import create_engine, Column, String, DateTime, Integer
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 
 # Load environment variables
 load_dotenv()
+
+# Database setup
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/vms.db")
+# Ensure directory exists for SQLite
+if DATABASE_URL.startswith("sqlite:///./"):
+    db_path = DATABASE_URL.replace("sqlite:///./", "")
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Database Models
+class CandidateDB(Base):
+    __tablename__ = "candidates"
+    
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    phone = Column(String, nullable=True)
+    job_id = Column(String, nullable=False)
+    resume_path = Column(String, nullable=False)
+    submitted_date = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, default="submitted")
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 app = FastAPI(title="VMS Backend API", version="1.0.0")
 
@@ -469,9 +509,6 @@ class CeipalClient:
 
 ceipal_client = CeipalClient()
 
-# In-memory storage for demo (replace with database in production)
-candidates_db = {}
-
 # API Endpoints
 @app.get("/")
 async def root():
@@ -561,7 +598,8 @@ async def submit_candidate(
     email: str = Form(...), 
     phone: Optional[str] = Form(None),
     job_id: str = Form(...),
-    resume: UploadFile = File(...)
+    resume: UploadFile = File(...),
+    db: Session = Depends(get_db)
 ):
     """Submit candidate resume for a job"""
     try:
@@ -583,9 +621,12 @@ async def submit_candidate(
             content = await resume.read()
             await f.write(content)
         
-        # Store candidate info
-        candidate_id = f"candidate_{len(candidates_db) + 1}"
-        candidate = Candidate(
+        # Generate unique candidate ID
+        count = db.query(CandidateDB).count()
+        candidate_id = f"candidate_{count + 1}"
+        
+        # Store candidate in database
+        db_candidate = CandidateDB(
             id=candidate_id,
             name=candidate_name,
             email=email,
@@ -595,8 +636,9 @@ async def submit_candidate(
             submitted_date=datetime.now(),
             status="submitted"
         )
-        
-        candidates_db[candidate_id] = candidate
+        db.add(db_candidate)
+        db.commit()
+        db.refresh(db_candidate)
         
         return {
             "message": "Candidate submitted successfully",
@@ -605,33 +647,32 @@ async def submit_candidate(
         }
         
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to submit candidate: {str(e)}")
 
 @app.get("/api/candidates/job/{job_id}")
-async def get_candidates_for_job(job_id: str):
+async def get_candidates_for_job(job_id: str, db: Session = Depends(get_db)):
     """Get all candidates submitted for a specific job"""
     try:
-        job_candidates = [
-            candidate for candidate in candidates_db.values()
-            if candidate.job_id == job_id
-        ]
+        job_candidates = db.query(CandidateDB).filter(CandidateDB.job_id == job_id).all()
         return {"candidates": job_candidates, "total": len(job_candidates)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
 
 @app.get("/api/candidates")
-async def get_all_candidates():
+async def get_all_candidates(db: Session = Depends(get_db)):
     """Get all submitted candidates"""
     try:
-        return {"candidates": list(candidates_db.values()), "total": len(candidates_db)}
+        candidates = db.query(CandidateDB).all()
+        return {"candidates": candidates, "total": len(candidates)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
 
 @app.get("/api/resumes/{candidate_id}")
-async def download_resume(candidate_id: str):
+async def download_resume(candidate_id: str, db: Session = Depends(get_db)):
     """Download resume file for a candidate"""
     try:
-        candidate = candidates_db.get(candidate_id)
+        candidate = db.query(CandidateDB).filter(CandidateDB.id == candidate_id).first()
         if not candidate:
             raise HTTPException(status_code=404, detail="Candidate not found")
         
