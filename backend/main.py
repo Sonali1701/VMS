@@ -336,7 +336,8 @@ async def get_current_user_info(current_user: UserDB = Depends(get_current_user)
         "created_at": current_user.created_at
     }
 
-# Serve uploaded resumes statically
+# Admin configuration
+ADMIN_EMAIL = "Admin@radixsol.com"
 if os.path.isdir(UPLOAD_DIR):
     app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 

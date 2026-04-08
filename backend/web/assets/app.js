@@ -73,6 +73,12 @@ let authToken = localStorage.getItem('vms_token') || null;
 let currentUser = JSON.parse(localStorage.getItem('vms_user') || 'null');
 let isRegisterMode = false;
 
+const ADMIN_EMAIL = 'Admin@radixsol.com';
+
+function isAdmin() {
+  return currentUser && currentUser.email && currentUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+}
+
 function showAuthAlert(kind, msg) {
   els.authAlert.hidden = false;
   els.authAlert.className = `alert ${kind === 'ok' ? 'alert--ok' : 'alert--error'}`;
@@ -91,6 +97,12 @@ function updateAuthUI() {
     els.userName.textContent = currentUser.full_name || currentUser.email;
     els.viewAuth.hidden = true;
     els.viewJobs.hidden = false;
+    
+    // Show/hide admin-only elements
+    const submissionsNav = document.querySelector('[data-view="submissions"]');
+    if (submissionsNav) {
+      submissionsNav.hidden = !isAdmin();
+    }
   } else {
     // Not logged in - show auth form
     els.userInfo.hidden = true;
@@ -378,8 +390,18 @@ function openJobDetailModal(job) {
   els.jobDetailFullDesc.textContent = job.description || 'No description available.';
   els.jobDetailRequirements.textContent = job.requirements || 'No requirements specified.';
   
+  // Show/hide candidates panel based on admin status (only admin sees submitted candidates)
+  const candidatesPanel = document.getElementById('jobDetailCandidatesPanel');
+  if (candidatesPanel) {
+    candidatesPanel.hidden = !isAdmin();
+  }
+  
   els.jobDetailModal.hidden = false;
-  loadJobDetailCandidates(activeJobId);
+  
+  // Only load candidates for admin
+  if (isAdmin()) {
+    loadJobDetailCandidates(activeJobId);
+  }
 }
 
 function closeJobDetailModal() {
