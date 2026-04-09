@@ -527,7 +527,7 @@ class CeipalClient:
                 page = 1
                 has_next = True
                 
-                while has_next and page <= 50:  # Limit to 50 pages (1000 jobs) to prevent infinite loops
+                while has_next and page <= 200:  # Limit to 200 pages to fetch more jobs
                     # Fetch current page
                     url = f"{self.reports_url}?response_type=1&page={page}"
                     response = await client.get(url, headers=headers)
