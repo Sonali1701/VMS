@@ -23,11 +23,18 @@ from uuid import uuid4
 load_dotenv()
 
 # Database setup
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/vms.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////opt/render/project/src/data/vms.db")
 # Ensure directory exists for SQLite
-if DATABASE_URL.startswith("sqlite:///./"):
-    db_path = DATABASE_URL.replace("sqlite:///./", "")
-    db_dir = os.path.dirname(db_path)
+if DATABASE_URL.startswith("sqlite://"):
+    # Extract path from sqlite:// URL
+    db_path = DATABASE_URL.replace("sqlite://", "")
+    if db_path.startswith("/"):
+        # Absolute path
+        db_dir = os.path.dirname(db_path)
+    else:
+        # Relative path (remove leading / if present after protocol)
+        db_path = db_path.lstrip("/")
+        db_dir = os.path.dirname(db_path)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
 
@@ -156,10 +163,10 @@ CEIPAL_REPORTS_URL = os.getenv("CEIPAL_REPORTS_URL", "https://bi.ceipal.com/Repo
 CEIPAL_EMAIL = os.getenv("CEIPAL_EMAIL", "amir@radixsol.com")
 CEIPAL_PASSWORD = os.getenv("CEIPAL_PASSWORD", "")
 CEIPAL_API_KEY = os.getenv("CEIPAL_API_KEY", "2693f0ed28f2250811fe40294e97e108a56afa9043e5336da4")
-CEIPAL_CACHE_DIR = os.getenv("CEIPAL_CACHE_DIR", "./cache")
+CEIPAL_CACHE_DIR = os.getenv("CEIPAL_CACHE_DIR", "/opt/render/project/src/data/cache")
 DEBUG = os.getenv("DEBUG", "False").lower() in {"1", "true", "yes", "y"}
 
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/opt/render/project/src/data/uploads")
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 10485760))  # 10MB
 
 # Ensure upload directory exists
