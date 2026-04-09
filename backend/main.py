@@ -849,6 +849,35 @@ async def get_ceipal_cache_status():
         "reports_cached": reports_cached,
     }
 
+@app.get("/api/health")
+async def health_check(db: Session = Depends(get_db)):
+    """Health check endpoint to verify database persistence"""
+    import os
+    
+    # Get database file path
+    db_path = DATABASE_URL.replace("sqlite://", "").lstrip("/")
+    if not db_path.startswith("/"):
+        db_path = "/" + db_path
+    
+    # Check if database file exists
+    db_exists = os.path.exists(db_path)
+    db_size = os.path.getsize(db_path) if db_exists else 0
+    
+    # Get user count
+    try:
+        user_count = db.query(UserDB).count()
+    except:
+        user_count = 0
+    
+    return {
+        "database_path": db_path,
+        "database_exists": db_exists,
+        "database_size_bytes": db_size,
+        "user_count": user_count,
+        "upload_dir": UPLOAD_DIR,
+        "upload_dir_exists": os.path.exists(UPLOAD_DIR),
+    }
+
 @app.get("/api/ceipal/reports")
 async def get_ceipal_reports():
     """Get raw reports data from Ceipal API"""
