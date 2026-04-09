@@ -654,18 +654,72 @@ class CeipalClient:
                     description_parts.append(f"Duration: {duration}")
                 description = " | ".join(description_parts) if description_parts else job_data.get("JobTitle", "")
             
+            # MSP Fee mapping (actual fee + 1% as requested)
+            msp_fees = {
+                "AHSA": 7.25,
+                "Triage/RTG": 6.50,
+                "PTH": 6.0,
+                "Supplemental": 8.0,
+                "Aya": 4.0,
+                "Aya Healthcare": 4.0,
+                "HWL": 7.50,
+                "Medical Solutions": 7.0,
+                "Careerstaff": 7.50,
+                "DNA": 7.25,
+                "Stability": 6.50,
+                "Snapcare": 6.0,
+                "Adaptive": 7.75,
+                "Sunburst": 6.0,
+                "Staffing Engine": 7.0,
+                "Medefis": 7.25,
+                "Windsor": 6.0,
+                "WAE (Gracedale Nursing Home)": 6.0,
+                "Hallmark and Vibra Healthcare": 7.0,
+                "Expedient": 6.0,
+                "TRS": 7.0,
+                "Favorite Healthcare": 8.0,
+                "OHT": 6.0,
+            }
+            
+            # Get client name and calculate updated bill rate
+            client_name = job_data.get("Client", "")
+            actual_bill_rate_str = job_data.get("ClientBillRateSalary", job_data.get("BillRate", "0"))
+            
+            # Parse actual bill rate (handle formats like "USD/76" or "76")
+            actual_rate = 0.0
+            try:
+                # Extract numeric value from string
+                rate_match = re.search(r'[\d.]+', str(actual_bill_rate_str))
+                if rate_match:
+                    actual_rate = float(rate_match.group())
+            except:
+                actual_rate = 0.0
+            
+            # Calculate updated bill rate: subtract (MSP fee + 1%) from actual rate
+            total_fee_percent = msp_fees.get(client_name, 7.0)  # Default 7% if client not found
+            updated_rate = actual_rate - ((total_fee_percent * actual_rate) / 100)
+            
+            # Format salary range with updated rate (hide actual)
+            if updated_rate > 0:
+                salary_range_display = f"${updated_rate:.2f}/hr"
+            else:
+                salary_range_display = "Contact for rate"
+            
+            # Get job code for display instead of client name
+            job_code = str(job_data.get("JobCode", f"job_{len(jobs)+1}"))
+            
             # Map Ceipal fields to our Job model
             job = Job(
-                id=str(job_data.get("JobCode", f"job_{len(jobs)+1}")),
+                id=job_code,
                 title=job_data.get("JobTitle", "Position Not Specified"),
                 description=description,
-                department=job_data.get("Client", "Healthcare"),  # Use Client as department/company
+                department=f"Job Code: {job_code}",  # Show job code instead of client
                 location=location if location else "Not specified",
                 employment_type=job_data.get("Duration", "Contract"),  # Duration as employment type
-                salary_range=job_data.get("ClientBillRateSalary", job_data.get("BillRate", "Not specified")),
+                salary_range=salary_range_display,  # Show updated rate to vendors
                 posted_date=self._parse_date(job_data.get("JobCreated", job_data.get("CreatedDate"))),
                 status=job_data.get("JobStatus", "Open"),
-                requirements=f"Bill Rate: {job_data.get('BillRate', 'N/A')} | Manager: {job_data.get('RecruitmentManager', 'N/A')}"
+                requirements=f"Bill Rate: {salary_range_display} | Manager: {job_data.get('RecruitmentManager', 'N/A')}"
             )
             jobs.append(job)
             
