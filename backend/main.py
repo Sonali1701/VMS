@@ -220,6 +220,11 @@ class Token(BaseModel):
     token_type: str
     user: UserResponse
 
+
+def reverse_string(s: str) -> str:
+    """Reverse a string for job code obfuscation"""
+    return s[::-1]
+
 class TokenData(BaseModel):
     email: Optional[str] = None
 
@@ -705,15 +710,16 @@ class CeipalClient:
             else:
                 salary_range_display = "Contact for rate"
             
-            # Get job code for display instead of client name
-            job_code = str(job_data.get("JobCode", f"job_{len(jobs)+1}"))
+            # Get job code and reverse it for vendor display
+            actual_job_code = str(job_data.get("JobCode", f"job_{len(jobs)+1}"))
+            reversed_job_code = reverse_string(actual_job_code)
             
             # Map Ceipal fields to our Job model
             job = Job(
-                id=job_code,
+                id=reversed_job_code,  # Show reversed job code to vendors
                 title=job_data.get("JobTitle", "Position Not Specified"),
                 description=description,
-                department=f"Job Code: {job_code}",  # Show job code instead of client
+                department=f"Job Code: {reversed_job_code}",  # Show reversed job code
                 location=location if location else "Not specified",
                 employment_type=job_data.get("Duration", "Contract"),  # Duration as employment type
                 salary_range=salary_range_display,  # Show updated rate to vendors
@@ -956,11 +962,22 @@ async def get_candidates_for_job(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
 
 @app.get("/api/candidates")
-async def get_all_candidates(db: Session = Depends(get_db)):
-    """Get all submitted candidates with submitter info"""
+async def get_all_candidates(
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get submitted candidates with submitter info. Vendors see only their own submissions, admin sees all."""
     try:
         from sqlalchemy.orm import joinedload
-        candidates = db.query(CandidateDB).options(joinedload(CandidateDB.submitted_by)).all()
+        
+        # Build query
+        query = db.query(CandidateDB).options(joinedload(CandidateDB.submitted_by))
+        
+        # If not admin, filter by current user
+        if current_user.email.lower() != ADMIN_EMAIL.lower():
+            query = query.filter(CandidateDB.submitted_by_user_id == current_user.id)
+        
+        candidates = query.all()
         
         result = []
         for c in candidates:

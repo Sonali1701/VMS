@@ -98,10 +98,10 @@ function updateAuthUI() {
     els.viewAuth.hidden = true;
     els.viewJobs.hidden = false;
     
-    // Show/hide admin-only elements
+    // Submissions tab visible for all users (vendors see their own, admin sees all)
     const submissionsNav = document.querySelector('[data-view="submissions"]');
     if (submissionsNav) {
-      submissionsNav.hidden = !isAdmin();
+      submissionsNav.hidden = false;
     }
   } else {
     // Not logged in - show auth form
@@ -233,6 +233,30 @@ function setStatus(kind, text) {
 
 async function apiGet(path) {
   const res = await fetch(`${API_BASE}${path}`);
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { _raw: text }; }
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.data = json;
+    throw err;
+  }
+  return json;
+}
+
+async function apiGetAuth(path) {
+  const headers = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  
+  const res = await fetch(`${API_BASE}${path}`, { headers });
+  
+  if (res.status === 401) {
+    logout();
+    throw new Error('Session expired. Please login again.');
+  }
+  
   const text = await res.text();
   let json;
   try { json = JSON.parse(text); } catch { json = { _raw: text }; }
@@ -630,13 +654,15 @@ async function loadSystem() {
 
 async function loadSubmissions() {
   try {
-    const data = await apiGet('/api/candidates');
+    const data = await apiGetAuth('/api/candidates');
     const items = data.candidates || [];
     if (!items.length) {
       els.submissionsTable.innerHTML = '<div class="empty">No submissions yet.</div>';
       return;
     }
 
+    const isUserAdmin = isAdmin();
+    
     const rows = items.map(c => `
       <tr>
         <td>${c.id || ''}</td>
@@ -644,17 +670,17 @@ async function loadSubmissions() {
         <td>${c.email || ''}</td>
         <td>${c.phone || ''}</td>
         <td>${c.job_id || ''}</td>
-        <td>${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</td>
+        ${isUserAdmin ? `<td>${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</td>` : ''}
         <td>${c.submitted_date || ''}</td>
         <td>${c.status || ''}</td>
         <td><button class="btn btn--secondary view-resume-btn" data-path="${c.resume_path || ''}">View Resume</button></td>
       </tr>
     `).join('');
-
+    
     els.submissionsTable.innerHTML = `
       <div class="panel">
         <div class="panel__title">Submissions (${items.length})</div>
-        <div class="panel__desc">Latest candidate entries captured by the backend. Click "View Resume" to open the resume file.</div>
+        <div class="panel__desc">${isUserAdmin ? 'All submissions by all vendors.' : 'Your submissions only.'}</div>
         <div class="code table-container">
           <table>
             <thead>
@@ -664,7 +690,7 @@ async function loadSubmissions() {
                 <th>Email</th>
                 <th>Phone</th>
                 <th>Job</th>
-                <th>Submitted By</th>
+                ${isUserAdmin ? '<th>Submitted By</th>' : ''}
                 <th>Submitted</th>
                 <th>Status</th>
                 <th>Resume</th>
