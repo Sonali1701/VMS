@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker, Session, relationship
 import bcrypt
 from jose import JWTError, jwt
 from uuid import uuid4
+import asyncio
 
 # Load environment variables
 load_dotenv()
@@ -378,13 +379,14 @@ class CeipalClient:
         self.last_auth_error = None
         self._jobs_cache = None
         self._jobs_cache_time = None
+        self._fetch_lock = asyncio.Lock()  # Prevent concurrent fetches
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def _get_cached_jobs(self) -> Optional[List[Job]]:
-        """Return cached jobs if less than 1 minute old"""
+        """Return cached jobs if less than 5 minutes old"""
         if self._jobs_cache and self._jobs_cache_time:
             age = datetime.now() - self._jobs_cache_time
-            if age < timedelta(minutes=1):
+            if age < timedelta(minutes=5):
                 return self._jobs_cache
         return None
 
@@ -531,92 +533,99 @@ class CeipalClient:
     
     async def fetch_jobs(self) -> List[Job]:
         """Fetch all jobs from Ceipal Reports API with pagination support and caching"""
-        # Check cache first
+        # Check cache first (outside lock for performance)
         cached_jobs = self._get_cached_jobs()
         if cached_jobs:
             return cached_jobs
         
-        all_jobs: List[Job] = []
-        
-        try:
-            token = await self.get_auth_token()
+        # Use lock to prevent multiple concurrent fetches
+        async with self._fetch_lock:
+            # Double-check cache after acquiring lock
+            cached_jobs = self._get_cached_jobs()
+            if cached_jobs:
+                return cached_jobs
             
-            async with httpx.AsyncClient() as client:
-                headers = {
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json"
-                }
-                
-                page = 1
-                has_next = True
-                total_records = 0
-                
-                while has_next and page <= 100:  # Limit to 100 pages (~2000 jobs) for performance
-                    # Fetch current page
-                    url = f"{self.reports_url}?response_type=1&page={page}"
-                    print(f"[Ceipal] Fetching page {page}...")
-                    response = await client.get(url, headers=headers, timeout=60.0)
-                    response.raise_for_status()
-                    
-                    reports_data = response.json()
-                    
-                    # Get total records from first page
-                    if page == 1:
-                        total_records = int(reports_data.get("record_count", 0))
-                        print(f"[Ceipal] Total records available: {total_records}")
-                        self._write_json_cache(
-                            "ceipal_reports_last.json",
-                            {
-                                "timestamp": datetime.now().isoformat(),
-                                "status_code": response.status_code,
-                                "url": url,
-                                "response": reports_data,
-                            },
-                        )
-                    
-                    # Parse jobs from this page
-                    page_jobs = await self._parse_jobs_from_reports(reports_data)
-                    all_jobs.extend(page_jobs)
-                    print(f"[Ceipal] Page {page}: fetched {len(page_jobs)} jobs, total so far: {len(all_jobs)}")
-                    
-                    # Check if there's a next page
-                    has_next_page_val = reports_data.get("has_next_page")
-                    next_page_val = reports_data.get("next_page")
-                    has_next = bool(has_next_page_val) or bool(next_page_val)
-                    
-                    print(f"[Ceipal] has_next_page={has_next_page_val}, next_page exists={bool(next_page_val)}, has_next={has_next}")
-                    
-                    # Stop if we have all records
-                    if len(all_jobs) >= total_records and total_records > 0:
-                        print(f"[Ceipal] Got all {total_records} records, stopping pagination")
-                        has_next = False
-                    
-                    page += 1
-                
-                print(f"[Ceipal] Finished fetching {len(all_jobs)} jobs from {page-1} pages")
-                
-                # Cache the results
-                self._set_cached_jobs(all_jobs)
-                return all_jobs
-                
-        except httpx.HTTPError as e:
-            if DEBUG:
-                print(f"Ceipal API Error: {e}")
-        except Exception as e:
-            if DEBUG:
-                print(f"Error fetching jobs: {e}")
-        
-        # Fallback: try cached reports
-        cached = self._read_json_cache("ceipal_reports_last.json")
-        if isinstance(cached, dict) and isinstance(cached.get("response"), (dict, list)):
+            all_jobs: List[Job] = []
+            
             try:
-                cached_data = cached.get("response")
-                return await self._parse_jobs_from_reports(cached_data)
-            except Exception:
-                pass
-        
-        # Last resort: mock jobs
-        return self._get_mock_jobs()
+                token = await self.get_auth_token()
+                
+                async with httpx.AsyncClient() as client:
+                    headers = {
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    page = 1
+                    has_next = True
+                    total_records = 0
+                    
+                    while has_next and page <= 100:  # Limit to 100 pages (~2000 jobs) for performance
+                        # Fetch current page
+                        url = f"{self.reports_url}?response_type=1&page={page}"
+                        print(f"[Ceipal] Fetching page {page}...")
+                        response = await client.get(url, headers=headers, timeout=60.0)
+                        response.raise_for_status()
+                        
+                        reports_data = response.json()
+                        
+                        # Get total records from first page
+                        if page == 1:
+                            total_records = int(reports_data.get("record_count", 0))
+                            print(f"[Ceipal] Total records available: {total_records}")
+                            self._write_json_cache(
+                                "ceipal_reports_last.json",
+                                {
+                                    "timestamp": datetime.now().isoformat(),
+                                    "status_code": response.status_code,
+                                    "url": url,
+                                    "response": reports_data,
+                                },
+                            )
+                        
+                        # Parse jobs from this page
+                        page_jobs = await self._parse_jobs_from_reports(reports_data)
+                        all_jobs.extend(page_jobs)
+                        print(f"[Ceipal] Page {page}: fetched {len(page_jobs)} jobs, total so far: {len(all_jobs)}")
+                        
+                        # Check if there's a next page
+                        has_next_page_val = reports_data.get("has_next_page")
+                        next_page_val = reports_data.get("next_page")
+                        has_next = bool(has_next_page_val) or bool(next_page_val)
+                        
+                        print(f"[Ceipal] has_next_page={has_next_page_val}, next_page exists={bool(next_page_val)}, has_next={has_next}")
+                        
+                        # Stop if we have all records
+                        if len(all_jobs) >= total_records and total_records > 0:
+                            print(f"[Ceipal] Got all {total_records} records, stopping pagination")
+                            has_next = False
+                        
+                        page += 1
+                    
+                    print(f"[Ceipal] Finished fetching {len(all_jobs)} jobs from {page-1} pages")
+                    
+                    # Cache the results
+                    self._set_cached_jobs(all_jobs)
+                    return all_jobs
+                    
+            except httpx.HTTPError as e:
+                if DEBUG:
+                    print(f"Ceipal API Error: {e}")
+            except Exception as e:
+                if DEBUG:
+                    print(f"Error fetching jobs: {e}")
+            
+            # Fallback: try cached reports
+            cached = self._read_json_cache("ceipal_reports_last.json")
+            if isinstance(cached, dict) and isinstance(cached.get("response"), (dict, list)):
+                try:
+                    cached_data = cached.get("response")
+                    return await self._parse_jobs_from_reports(cached_data)
+                except Exception:
+                    pass
+            
+            # Last resort: mock jobs
+            return self._get_mock_jobs()
 
     async def _parse_jobs_from_reports(self, reports_data) -> List[Job]:
         """Parse Ceipal reports data into Job models.
