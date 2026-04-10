@@ -127,6 +127,17 @@ def get_db():
 
 app = FastAPI(title="VMS Backend API", version="1.0.0")
 
+# Startup event to pre-fetch jobs
+@app.on_event("startup")
+async def startup_event():
+    """Pre-fetch jobs on startup to populate cache"""
+    print("[Startup] Pre-fetching jobs from Ceipal...")
+    try:
+        jobs = await ceipal_client.fetch_jobs()
+        print(f"[Startup] Pre-fetched {len(jobs)} jobs")
+    except Exception as e:
+        print(f"[Startup] Failed to pre-fetch jobs: {e}")
+
 # Web UI (HTML/CSS/JS)
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 ASSETS_DIR = os.path.join(WEB_DIR, "assets")
@@ -819,18 +830,39 @@ async def root():
 
 @app.get("/api/jobs", response_model=JobListResponse)
 async def get_jobs():
-    """Get all active jobs from Ceipal API"""
+    """Get all active jobs from Ceipal API (uses cache if available for fast response)"""
     try:
+        # First, try to get cached jobs for immediate response
+        cached_jobs = ceipal_client._get_cached_jobs()
+        
+        if cached_jobs:
+            # Return cached jobs immediately (fast response)
+            # Trigger background refresh if cache is older than 5 minutes
+            cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
+            if cache_age > timedelta(minutes=5):
+                # Cache is stale, but still return it. Next request will get fresh data.
+                pass
+            return JobListResponse(jobs=cached_jobs, total=len(cached_jobs))
+        
+        # No cache - fetch fresh (this may take time)
         jobs = await ceipal_client.fetch_jobs()
         return JobListResponse(jobs=jobs, total=len(jobs))
     except Exception as e:
+        # If fetch fails, try to return stale cache as fallback
+        if ceipal_client._jobs_cache:
+            return JobListResponse(jobs=ceipal_client._jobs_cache, total=len(ceipal_client._jobs_cache))
         raise HTTPException(status_code=500, detail=f"Failed to fetch jobs: {str(e)}")
 
 @app.get("/api/jobs/{job_id}", response_model=Job)
 async def get_job(job_id: str):
     """Get specific job details"""
     try:
-        jobs = await ceipal_client.fetch_jobs()
+        # Try cache first
+        jobs = ceipal_client._get_cached_jobs()
+        if not jobs:
+            # No cache, fetch fresh
+            jobs = await ceipal_client.fetch_jobs()
+        
         job = next((job for job in jobs if job.id == job_id), None)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
