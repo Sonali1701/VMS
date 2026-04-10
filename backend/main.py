@@ -381,6 +381,11 @@ class CeipalClient:
         """Cache jobs with timestamp"""
         self._jobs_cache = jobs
         self._jobs_cache_time = datetime.now()
+    
+    def clear_cache(self):
+        """Clear the jobs cache to force fresh fetch"""
+        self._jobs_cache = None
+        self._jobs_cache_time = None
 
     def _cache_path(self, filename: str) -> str:
         return os.path.join(self.cache_dir, filename)
@@ -533,17 +538,21 @@ class CeipalClient:
                 
                 page = 1
                 has_next = True
+                total_records = 0
                 
                 while has_next and page <= 200:  # Limit to 200 pages to fetch more jobs
                     # Fetch current page
                     url = f"{self.reports_url}?response_type=1&page={page}"
-                    response = await client.get(url, headers=headers)
+                    print(f"[Ceipal] Fetching page {page}...")
+                    response = await client.get(url, headers=headers, timeout=60.0)
                     response.raise_for_status()
                     
                     reports_data = response.json()
                     
-                    # Cache first page for inspection
+                    # Get total records from first page
                     if page == 1:
+                        total_records = int(reports_data.get("record_count", 0))
+                        print(f"[Ceipal] Total records available: {total_records}")
                         self._write_json_cache(
                             "ceipal_reports_last.json",
                             {
@@ -557,19 +566,23 @@ class CeipalClient:
                     # Parse jobs from this page
                     page_jobs = await self._parse_jobs_from_reports(reports_data)
                     all_jobs.extend(page_jobs)
+                    print(f"[Ceipal] Page {page}: fetched {len(page_jobs)} jobs, total so far: {len(all_jobs)}")
                     
                     # Check if there's a next page
-                    has_next = bool(
-                        reports_data.get("has_next_page") or 
-                        reports_data.get("next_page")
-                    )
+                    has_next_page_val = reports_data.get("has_next_page")
+                    next_page_val = reports_data.get("next_page")
+                    has_next = bool(has_next_page_val) or bool(next_page_val)
                     
-                    # Also check record count vs what we have
-                    total_records = int(reports_data.get("record_count", 0))
-                    if len(all_jobs) >= total_records:
+                    print(f"[Ceipal] has_next_page={has_next_page_val}, next_page exists={bool(next_page_val)}, has_next={has_next}")
+                    
+                    # Stop if we have all records
+                    if len(all_jobs) >= total_records and total_records > 0:
+                        print(f"[Ceipal] Got all {total_records} records, stopping pagination")
                         has_next = False
                     
                     page += 1
+                
+                print(f"[Ceipal] Finished fetching {len(all_jobs)} jobs from {page-1} pages")
                 
                 # Cache the results
                 self._set_cached_jobs(all_jobs)
@@ -884,6 +897,20 @@ async def health_check(db: Session = Depends(get_db)):
         "upload_dir": UPLOAD_DIR,
         "upload_dir_exists": os.path.exists(UPLOAD_DIR),
     }
+
+@app.post("/api/ceipal/refresh")
+async def force_refresh_jobs():
+    """Clear cache and force fresh job fetch from Ceipal"""
+    try:
+        ceipal_client.clear_cache()
+        jobs = await ceipal_client.fetch_jobs()
+        return {
+            "message": "Jobs refreshed successfully",
+            "jobs_fetched": len(jobs),
+            "cached": False
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to refresh jobs: {str(e)}")
 
 @app.get("/api/ceipal/reports")
 async def get_ceipal_reports():
