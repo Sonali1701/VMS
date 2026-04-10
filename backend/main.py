@@ -370,11 +370,8 @@ class CeipalClient:
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def _get_cached_jobs(self) -> Optional[List[Job]]:
-        """Return cached jobs if less than 15 minutes old"""
-        if self._jobs_cache and self._jobs_cache_time:
-            age = datetime.now() - self._jobs_cache_time
-            if age < timedelta(minutes=15):
-                return self._jobs_cache
+        """Return cached jobs if less than 1 minute old (effectively disabled for fresh data)"""
+        # Cache disabled - always fetch fresh jobs
         return None
 
     def _set_cached_jobs(self, jobs: List[Job]):
@@ -904,10 +901,26 @@ async def force_refresh_jobs():
     try:
         ceipal_client.clear_cache()
         jobs = await ceipal_client.fetch_jobs()
+        
+        # Read the cached first page to get pagination info
+        cache_data = ceipal_client._read_json_cache("ceipal_reports_last.json")
+        pagination_info = {}
+        if cache_data and cache_data.get("response"):
+            resp = cache_data["response"]
+            pagination_info = {
+                "record_count": resp.get("record_count"),
+                "page_count": resp.get("page_count"),
+                "limit": resp.get("limit"),
+                "has_next_page": resp.get("has_next_page"),
+                "has_prev_page": resp.get("has_prev_page"),
+                "next_page_exists": bool(resp.get("next_page")),
+            }
+        
         return {
             "message": "Jobs refreshed successfully",
             "jobs_fetched": len(jobs),
-            "cached": False
+            "cached": False,
+            "pagination_from_page1": pagination_info
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refresh jobs: {str(e)}")
