@@ -370,8 +370,11 @@ class CeipalClient:
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def _get_cached_jobs(self) -> Optional[List[Job]]:
-        """Return cached jobs if less than 1 minute old (effectively disabled for fresh data)"""
-        # Cache disabled - always fetch fresh jobs
+        """Return cached jobs if less than 1 minute old"""
+        if self._jobs_cache and self._jobs_cache_time:
+            age = datetime.now() - self._jobs_cache_time
+            if age < timedelta(minutes=1):
+                return self._jobs_cache
         return None
 
     def _set_cached_jobs(self, jobs: List[Job]):
@@ -537,7 +540,7 @@ class CeipalClient:
                 has_next = True
                 total_records = 0
                 
-                while has_next and page <= 200:  # Limit to 200 pages to fetch more jobs
+                while has_next and page <= 100:  # Limit to 100 pages (~2000 jobs) for performance
                     # Fetch current page
                     url = f"{self.reports_url}?response_type=1&page={page}"
                     print(f"[Ceipal] Fetching page {page}...")
