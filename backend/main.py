@@ -210,6 +210,9 @@ class Candidate(BaseModel):
 class JobListResponse(BaseModel):
     jobs: List[Job]
     total: int
+    total_pages: int = 0
+    next_start_page: int = 0
+    has_more: bool = False
 
 class CandidateSubmission(BaseModel):
     candidate_name: str
@@ -376,6 +379,7 @@ class CeipalClient:
         self._jobs_cache = None
         self._jobs_cache_time = None
         self._fetch_lock = asyncio.Lock()  # Prevent concurrent fetches
+        self._last_fetched_pages = 0  # Track how many pages were fetched
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def _get_cached_jobs(self) -> Optional[List[Job]]:
@@ -599,6 +603,10 @@ class CeipalClient:
                         page += 1
                     
                     print(f"[Ceipal] Finished fetching {len(all_jobs)} jobs from {page-1} pages")
+                    
+                    # Track how many pages we fetched for pagination info
+                    self._last_fetched_pages = page - 1
+                    self._last_total_records = total_records  # Store total available from Ceipal
                     
                     # Cache the results
                     self._set_cached_jobs(all_jobs)
@@ -893,22 +901,54 @@ async def get_jobs(background_tasks: BackgroundTasks):
             if cache_age > timedelta(minutes=5):
                 # Trigger background refresh without waiting
                 background_tasks.add_task(ceipal_client.fetch_jobs)
-            return JobListResponse(jobs=cached_jobs, total=len(cached_jobs))
+            # Calculate pagination info based on Ceipal having more pages
+            total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
+            total_records = getattr(ceipal_client, '_last_total_records', 0)
+            jobs_fetched = len(cached_jobs)
+            # Has more if we fetched less than total records available
+            has_more = jobs_fetched < total_records and total_records > 0
+            return JobListResponse(
+                jobs=cached_jobs, 
+                total=len(cached_jobs),
+                total_pages=total_pages,
+                next_start_page=total_pages + 1,
+                has_more=has_more
+            )
         
         # No cache - check if we have any stale cache at all
         if ceipal_client._jobs_cache:
             # Return stale cache and refresh in background
             background_tasks.add_task(ceipal_client.fetch_jobs)
-            return JobListResponse(jobs=ceipal_client._jobs_cache, total=len(ceipal_client._jobs_cache))
+            total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
+            return JobListResponse(
+                jobs=ceipal_client._jobs_cache, 
+                total=len(ceipal_client._jobs_cache),
+                total_pages=total_pages,
+                next_start_page=total_pages + 1,
+                has_more=total_pages >= 25
+            )
         
         # Completely empty - we have to fetch (may timeout with many pages)
-        # For first load, just fetch page 1 quickly to show something immediately
         jobs = await ceipal_client.fetch_jobs()
-        return JobListResponse(jobs=jobs, total=len(jobs))
+        total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
+        return JobListResponse(
+            jobs=jobs, 
+            total=len(jobs),
+            total_pages=total_pages,
+            next_start_page=total_pages + 1,
+            has_more=total_pages >= 25
+        )
     except Exception as e:
         # If fetch fails, try to return any cached data as fallback
         if ceipal_client._jobs_cache:
-            return JobListResponse(jobs=ceipal_client._jobs_cache, total=len(ceipal_client._jobs_cache))
+            total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
+            return JobListResponse(
+                jobs=ceipal_client._jobs_cache, 
+                total=len(ceipal_client._jobs_cache),
+                total_pages=total_pages,
+                next_start_page=total_pages + 1,
+                has_more=total_pages >= 25
+            )
         raise HTTPException(status_code=500, detail=f"Failed to fetch jobs: {str(e)}")
 
 @app.get("/api/jobs/{job_id}", response_model=Job)

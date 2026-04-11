@@ -678,16 +678,20 @@ async function loadJobs() {
   els.jobsEmpty.hidden = true;
   
   // Reset infinite scroll state
-  nextStartPage = 26;
-  hasMoreJobs = true;
+  currentPage = 1;
   isLoadingMore = false;
   
   try {
     const data = await apiGet('/api/jobs');
     allJobs = data.jobs || [];
+    // Use backend pagination info
+    hasMoreJobs = data.has_more || false;
+    nextStartPage = data.next_start_page || 26;
+    console.log(`[Jobs] Loaded ${allJobs.length} jobs. Has more: ${hasMoreJobs}, next start page: ${nextStartPage}`);
     renderJobs();
   } catch (e) {
     allJobs = [];
+    hasMoreJobs = false;
     renderJobs();
   }
 }
@@ -699,16 +703,19 @@ async function loadMoreJobs() {
   showLoadingSpinner();
   
   try {
+    console.log(`[Jobs] Loading more from page ${nextStartPage}...`);
     const data = await apiGet(`/api/jobs/load-more?start_page=${nextStartPage}&max_pages=25`);
     const newJobs = data.jobs || [];
     
     if (newJobs.length > 0) {
       allJobs = [...allJobs, ...newJobs];
-      nextStartPage += 25;
+      nextStartPage = data.next_start_page || nextStartPage + 25;
+      hasMoreJobs = data.has_more || false;
+      console.log(`[Jobs] Loaded ${newJobs.length} more jobs. Total: ${allJobs.length}. Has more: ${hasMoreJobs}`);
       renderJobs();
     } else {
       hasMoreJobs = false;
-      hideLoadingSpinner();
+      console.log('[Jobs] No more jobs to load');
     }
   } catch (e) {
     console.error('Failed to load more jobs:', e);
