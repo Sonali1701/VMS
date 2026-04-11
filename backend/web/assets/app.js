@@ -605,11 +605,8 @@ async function submitResume({ closeAfter }) {
 
   try {
     const res = await apiPostFormAuth('/api/candidates/submit', fd);
-    if (closeAfter) {
-      showAlert('ok', `Submitted successfully by ${res.submitted_by || 'you'}. Candidate ID: ${res.candidate_id || 'N/A'}`);
-    } else {
-      showAlert('ok', `Submitted successfully by ${res.submitted_by || 'you'}.`);
-    }
+    // Don't show candidate ID in success message
+    showAlert('ok', `Submitted successfully by ${res.submitted_by || 'you'}.`);
     if (closeAfter) {
       setTimeout(() => closeSubmitModal(), 650);
     } else {
@@ -702,7 +699,8 @@ function showLoadingSpinner() {
     spinner.id = 'loadMoreSpinner';
     spinner.className = 'loading-spinner';
     spinner.innerHTML = '<div class="spinner"></div><span>Loading more jobs...</span>';
-    spinner.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;padding:20px;color:#6b7280;';
+    // Make spinner full width of grid, visible, and positioned at the bottom
+    spinner.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;padding:30px;color:#6b7280;grid-column:1/-1;width:100%;background:#f8fafc;border-top:1px solid #e5e7eb;margin-top:20px;';
     els.jobsGrid.appendChild(spinner);
   }
   spinner.style.display = 'flex';
@@ -738,6 +736,9 @@ async function loadSystem() {
 }
 
 async function loadSubmissions() {
+  // Clear table immediately to prevent showing stale data
+  els.submissionsTable.innerHTML = '<div class="loading-jobs">Loading submissions...</div>';
+  
   try {
     const data = await apiGetAuth('/api/candidates');
     const items = data.candidates || [];
@@ -839,6 +840,9 @@ async function loadStarts() {
 }
 
 function showCandidateDetailsModal(candidate) {
+  // Remove any existing modal first
+  closeCandidateDetailModal();
+  
   const details = `
     <div style="margin-bottom: 16px;"><strong>ID:</strong> ${candidate.id || 'N/A'}</div>
     <div style="margin-bottom: 16px;"><strong>Name:</strong> ${candidate.name || 'N/A'}</div>
@@ -861,9 +865,10 @@ function showCandidateDetailsModal(candidate) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.id = 'candidateDetailModal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:10000;display:flex;align-items:center;justify-content:center;';
   modal.innerHTML = `
-    <div class="modal__overlay" onclick="closeCandidateDetailModal()"></div>
-    <div class="modal__content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+    <div class="modal__overlay" onclick="closeCandidateDetailModal()" style="position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1;"></div>
+    <div class="modal__content" style="position:relative;z-index:2;max-width:600px;max-height:80vh;overflow-y:auto;background:white;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
       <div class="modal__header">
         <h3>Candidate Details</h3>
         <button class="modal__close" onclick="closeCandidateDetailModal()">&times;</button>
@@ -885,6 +890,9 @@ function closeCandidateDetailModal() {
 }
 
 function showVendorDetailsModal(vendor) {
+  // Remove any existing modal first
+  closeVendorDetailModal();
+  
   const details = `
     <div style="margin-bottom: 16px;"><strong>Name:</strong> ${vendor.full_name || vendor.name || 'N/A'}</div>
     <div style="margin-bottom: 16px;"><strong>Email:</strong> ${vendor.email || 'N/A'}</div>
@@ -894,9 +902,10 @@ function showVendorDetailsModal(vendor) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.id = 'vendorDetailModal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:10000;display:flex;align-items:center;justify-content:center;';
   modal.innerHTML = `
-    <div class="modal__overlay" onclick="closeVendorDetailModal()"></div>
-    <div class="modal__content" style="max-width: 400px;">
+    <div class="modal__overlay" onclick="closeVendorDetailModal()" style="position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1;"></div>
+    <div class="modal__content" style="position:relative;z-index:2;max-width:400px;background:white;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
       <div class="modal__header">
         <h3>Vendor Details</h3>
         <button class="modal__close" onclick="closeVendorDetailModal()">&times;</button>
