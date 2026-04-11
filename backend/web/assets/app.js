@@ -605,7 +605,11 @@ async function submitResume({ closeAfter }) {
 
   try {
     const res = await apiPostFormAuth('/api/candidates/submit', fd);
-    showAlert('ok', `Submitted successfully by ${res.submitted_by || 'you'}. Candidate ID: ${res.candidate_id || 'N/A'}`);
+    if (closeAfter) {
+      showAlert('ok', `Submitted successfully by ${res.submitted_by || 'you'}. Candidate ID: ${res.candidate_id || 'N/A'}`);
+    } else {
+      showAlert('ok', `Submitted successfully by ${res.submitted_by || 'you'}.`);
+    }
     if (closeAfter) {
       setTimeout(() => closeSubmitModal(), 650);
     } else {
@@ -745,13 +749,13 @@ async function loadSubmissions() {
     const isUserAdmin = isAdmin();
     
     const rows = items.map(c => `
-      <tr>
+      <tr data-candidate='${JSON.stringify(c).replace(/'/g, "\\'")}'>
         <td>${c.id || ''}</td>
-        <td>${c.name || ''}</td>
+        <td><a href="#" class="candidate-name-link" style="color: #7c3aed; text-decoration: underline; cursor: pointer;">${c.name || ''}</a></td>
         <td>${c.email || ''}</td>
         <td>${c.phone || ''}</td>
         <td>${c.job_id || ''}</td>
-        ${isUserAdmin ? `<td>${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</td>` : ''}
+        ${isUserAdmin ? `<td><a href="#" class="vendor-name-link" data-vendor='${JSON.stringify(c.submitted_by || {}).replace(/'/g, "\\'")}' style="color: #7c3aed; text-decoration: underline; cursor: pointer;">${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</a></td>` : ''}
         <td>${c.submitted_date || ''}</td>
         <td>${c.status || ''}</td>
         <td><button class="btn btn--secondary view-resume-btn" data-path="${c.resume_path || ''}">View Resume</button></td>
@@ -795,6 +799,25 @@ async function loadSubmissions() {
         }
       });
     });
+    
+    // Add event listeners for candidate name clicks (show candidate details)
+    document.querySelectorAll('.candidate-name-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const row = e.target.closest('tr');
+        const candidateData = JSON.parse(row.dataset.candidate);
+        showCandidateDetailsModal(candidateData);
+      });
+    });
+    
+    // Add event listeners for vendor name clicks (show vendor details) - admin only
+    document.querySelectorAll('.vendor-name-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const vendorData = JSON.parse(e.target.dataset.vendor);
+        showVendorDetailsModal(vendorData);
+      });
+    });
   } catch (e) {
     els.submissionsTable.innerHTML = `<div class="empty">Failed to load submissions.</div>`;
   }
@@ -813,6 +836,85 @@ async function loadDeclines() {
 async function loadStarts() {
   // Placeholder for starts data
   els.startsTable.innerHTML = '<div class="empty">Starts feature coming soon. Track candidates who have started working.</div>';
+}
+
+function showCandidateDetailsModal(candidate) {
+  const details = `
+    <div style="margin-bottom: 16px;"><strong>ID:</strong> ${candidate.id || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Name:</strong> ${candidate.name || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Email:</strong> ${candidate.email || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Phone:</strong> ${candidate.phone || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Job ID:</strong> ${candidate.job_id || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Job Title:</strong> ${candidate.job_title || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Primary Skills:</strong> ${candidate.skills || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Location:</strong> ${candidate.location || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Experience:</strong> ${candidate.experience || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Bill Rate:</strong> ${candidate.bill_rate || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Tentative Start Date:</strong> ${candidate.tentative_start_date || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>RTO (Return to Office):</strong> ${candidate.rto || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Candidate Summary:</strong> ${candidate.candidate_summary || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Status:</strong> ${candidate.status || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Submitted Date:</strong> ${candidate.submitted_date || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Resume:</strong> <button class="btn btn--secondary" onclick="window.open('${API_BASE}/api/resumes/${candidate.id}', '_blank')">View Resume</button></div>
+  `;
+  
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.id = 'candidateDetailModal';
+  modal.innerHTML = `
+    <div class="modal__overlay" onclick="closeCandidateDetailModal()"></div>
+    <div class="modal__content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+      <div class="modal__header">
+        <h3>Candidate Details</h3>
+        <button class="modal__close" onclick="closeCandidateDetailModal()">&times;</button>
+      </div>
+      <div class="modal__body" style="padding: 20px;">
+        ${details}
+      </div>
+      <div class="modal__footer" style="padding: 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+        <button class="btn btn--secondary" onclick="closeCandidateDetailModal()">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function closeCandidateDetailModal() {
+  const modal = document.getElementById('candidateDetailModal');
+  if (modal) modal.remove();
+}
+
+function showVendorDetailsModal(vendor) {
+  const details = `
+    <div style="margin-bottom: 16px;"><strong>Name:</strong> ${vendor.full_name || vendor.name || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>Email:</strong> ${vendor.email || 'N/A'}</div>
+    <div style="margin-bottom: 16px;"><strong>ID:</strong> ${vendor.id || 'N/A'}</div>
+  `;
+  
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.id = 'vendorDetailModal';
+  modal.innerHTML = `
+    <div class="modal__overlay" onclick="closeVendorDetailModal()"></div>
+    <div class="modal__content" style="max-width: 400px;">
+      <div class="modal__header">
+        <h3>Vendor Details</h3>
+        <button class="modal__close" onclick="closeVendorDetailModal()">&times;</button>
+      </div>
+      <div class="modal__body" style="padding: 20px;">
+        ${details}
+      </div>
+      <div class="modal__footer" style="padding: 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+        <button class="btn btn--secondary" onclick="closeVendorDetailModal()">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function closeVendorDetailModal() {
+  const modal = document.getElementById('vendorDetailModal');
+  if (modal) modal.remove();
 }
 
 // UI events
@@ -864,13 +966,16 @@ if (els.authToggleBtn) {
   els.authToggleBtn.addEventListener('click', toggleAuthMode);
 }
 
-// Infinite scroll - detect when user reaches bottom of jobs grid
-els.jobsGrid.addEventListener('scroll', () => {
+// Infinite scroll - detect when user reaches bottom of page
+window.addEventListener('scroll', () => {
   if (!hasMoreJobs || isLoadingMore) return;
   
-  const { scrollTop, scrollHeight, clientHeight } = els.jobsGrid;
-  // Load more when user scrolls to within 100px of bottom
-  if (scrollTop + clientHeight >= scrollHeight - 100) {
+  const scrollTop = window.scrollY || document.documentElement.scrollTop;
+  const windowHeight = window.innerHeight;
+  const documentHeight = document.documentElement.scrollHeight;
+  
+  // Load more when user scrolls to within 200px of bottom
+  if (scrollTop + windowHeight >= documentHeight - 200) {
     loadMoreJobs();
   }
 });
