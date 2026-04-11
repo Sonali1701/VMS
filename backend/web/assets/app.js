@@ -1,5 +1,11 @@
 const API_BASE = window.location.origin;
 
+// Infinite scroll state
+let currentPage = 1;
+let isLoadingMore = false;
+let hasMoreJobs = true;
+let nextStartPage = 26;  // After initial 25 pages
+
 const els = {
   jobsGrid: document.getElementById('jobsGrid'),
   jobsEmpty: document.getElementById('jobsEmpty'),
@@ -616,8 +622,14 @@ if (els.submitCloseBtn) {
 }
 
 async function loadJobs() {
-  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>This may take up to a minute on first load</small></div>';
+  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>Loading first batch...</small></div>';
   els.jobsEmpty.hidden = true;
+  
+  // Reset infinite scroll state
+  nextStartPage = 26;
+  hasMoreJobs = true;
+  isLoadingMore = false;
+  
   try {
     const data = await apiGet('/api/jobs');
     allJobs = data.jobs || [];
@@ -626,6 +638,51 @@ async function loadJobs() {
     allJobs = [];
     renderJobs();
   }
+}
+
+async function loadMoreJobs() {
+  if (isLoadingMore || !hasMoreJobs) return;
+  
+  isLoadingMore = true;
+  showLoadingSpinner();
+  
+  try {
+    const data = await apiGet(`/api/jobs/load-more?start_page=${nextStartPage}&max_pages=25`);
+    const newJobs = data.jobs || [];
+    
+    if (newJobs.length > 0) {
+      allJobs = [...allJobs, ...newJobs];
+      nextStartPage += 25;
+      renderJobs();
+    } else {
+      hasMoreJobs = false;
+      hideLoadingSpinner();
+    }
+  } catch (e) {
+    console.error('Failed to load more jobs:', e);
+    hasMoreJobs = false;
+    hideLoadingSpinner();
+  } finally {
+    isLoadingMore = false;
+  }
+}
+
+function showLoadingSpinner() {
+  let spinner = document.getElementById('loadMoreSpinner');
+  if (!spinner) {
+    spinner = document.createElement('div');
+    spinner.id = 'loadMoreSpinner';
+    spinner.className = 'loading-spinner';
+    spinner.innerHTML = '<div class="spinner"></div><span>Loading more jobs...</span>';
+    spinner.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;padding:20px;color:#6b7280;';
+    els.jobsGrid.appendChild(spinner);
+  }
+  spinner.style.display = 'flex';
+}
+
+function hideLoadingSpinner() {
+  const spinner = document.getElementById('loadMoreSpinner');
+  if (spinner) spinner.style.display = 'none';
 }
 
 async function loadCeipalStatus() {
@@ -767,6 +824,17 @@ if (els.authSubmitBtn) {
 if (els.authToggleBtn) {
   els.authToggleBtn.addEventListener('click', toggleAuthMode);
 }
+
+// Infinite scroll - detect when user reaches bottom of jobs grid
+els.jobsGrid.addEventListener('scroll', () => {
+  if (!hasMoreJobs || isLoadingMore) return;
+  
+  const { scrollTop, scrollHeight, clientHeight } = els.jobsGrid;
+  // Load more when user scrolls to within 100px of bottom
+  if (scrollTop + clientHeight >= scrollHeight - 100) {
+    loadMoreJobs();
+  }
+});
 
 // init
 (async function init() {

@@ -240,10 +240,6 @@ class Token(BaseModel):
     user: UserResponse
 
 
-def reverse_string(s: str) -> str:
-    """Reverse a string for job code obfuscation"""
-    return s[::-1]
-
 class TokenData(BaseModel):
     email: Optional[str] = None
 
@@ -560,7 +556,7 @@ class CeipalClient:
                     has_next = True
                     total_records = 0
                     
-                    while has_next and page <= 100:  # Limit to 100 pages (~2000 jobs) for performance
+                    while has_next and page <= 25:  # Limit to 25 pages (~500 jobs) for fast loading
                         # Fetch current page
                         url = f"{self.reports_url}?response_type=1&page={page}"
                         print(f"[Ceipal] Fetching page {page}...")
@@ -626,6 +622,46 @@ class CeipalClient:
             
             # Last resort: mock jobs
             return self._get_mock_jobs()
+    
+    async def fetch_more_jobs(self, start_page: int, max_pages: int = 25) -> List[Job]:
+        """Fetch additional pages of jobs beyond initial load"""
+        more_jobs: List[Job] = []
+        
+        try:
+            token = await self.get_auth_token()
+            
+            async with httpx.AsyncClient() as client:
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+                
+                page = start_page
+                end_page = start_page + max_pages - 1
+                has_next = True
+                
+                while has_next and page <= end_page:
+                    url = f"{self.reports_url}?response_type=1&page={page}"
+                    print(f"[Ceipal] Loading more - page {page}...")
+                    response = await client.get(url, headers=headers, timeout=60.0)
+                    response.raise_for_status()
+                    
+                    reports_data = response.json()
+                    page_jobs = await self._parse_jobs_from_reports(reports_data)
+                    more_jobs.extend(page_jobs)
+                    
+                    has_next_page_val = reports_data.get("has_next_page")
+                    next_page_val = reports_data.get("next_page")
+                    has_next = bool(has_next_page_val) or bool(next_page_val)
+                    
+                    page += 1
+                
+                print(f"[Ceipal] Loaded {len(more_jobs)} more jobs from pages {start_page}-{page-1}")
+                return more_jobs
+                
+        except Exception as e:
+            print(f"[Ceipal] Error loading more jobs: {e}")
+            return []
 
     async def _parse_jobs_from_reports(self, reports_data) -> List[Job]:
         """Parse Ceipal reports data into Job models.
@@ -750,16 +786,15 @@ class CeipalClient:
             else:
                 salary_range_display = "Contact for rate"
             
-            # Get job code and reverse it for vendor display
+            # Get actual job code
             actual_job_code = str(job_data.get("JobCode", f"job_{len(jobs)+1}"))
-            reversed_job_code = reverse_string(actual_job_code)
             
             # Map Ceipal fields to our Job model
             job = Job(
-                id=reversed_job_code,  # Show reversed job code to vendors
+                id=actual_job_code,
                 title=job_data.get("JobTitle", "Position Not Specified"),
                 description=description,
-                department=f"Job Code: {reversed_job_code}",  # Show reversed job code
+                department=f"Job Code: {actual_job_code}",
                 location=location if location else "Not specified",
                 employment_type=job_data.get("Duration", "Contract"),  # Duration as employment type
                 salary_range=salary_range_display,  # Show updated rate to vendors
@@ -885,6 +920,15 @@ async def get_job(job_id: str):
         return job
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch job: {str(e)}")
+
+@app.get("/api/jobs/load-more")
+async def load_more_jobs(start_page: int = 26, max_pages: int = 25):
+    """Load additional pages of jobs for infinite scroll"""
+    try:
+        more_jobs = await ceipal_client.fetch_more_jobs(start_page, max_pages)
+        return {"jobs": more_jobs, "total": len(more_jobs), "start_page": start_page}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load more jobs: {str(e)}")
 
 @app.get("/api/ceipal/test")
 async def test_ceipal_connection():
