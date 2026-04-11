@@ -1189,6 +1189,40 @@ async def get_all_candidates(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
 
+@app.patch("/api/candidates/{candidate_id}/status")
+async def update_candidate_status(
+    candidate_id: str,
+    status: str,
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update candidate status. Vendors can only update their own candidates."""
+    try:
+        # Find the candidate
+        candidate = db.query(CandidateDB).filter(CandidateDB.id == candidate_id).first()
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        
+        # Check permissions - only admin or the vendor who submitted can update
+        is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
+        if not is_admin and candidate.submitted_by_user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You can only update your own candidates")
+        
+        # Validate status
+        valid_statuses = ["submitted", "offer", "decline", "start"]
+        if status.lower() not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+        
+        candidate.status = status.lower()
+        db.commit()
+        
+        return {"message": "Status updated successfully", "candidate_id": candidate_id, "status": status.lower()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update status: {str(e)}")
+
 @app.get("/api/resumes/{candidate_id}")
 async def download_resume(candidate_id: str, db: Session = Depends(get_db)):
     """Download resume file for a candidate"""

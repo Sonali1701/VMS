@@ -31,11 +31,12 @@
           <div id="userName" style="font-weight: 600; font-size: 13px; margin-bottom: 8px;"></div>
           <button class="btn btn--secondary" id="logoutBtn" style="width: 100%; font-size: 12px; padding: 6px;">Logout</button>
         </div>
-        <div class="status" id="systemStatus">
+        <!-- Hidden for production -->
+        <div class="status" id="systemStatus" hidden>
           <div class="status__dot status__dot--warn"></div>
           <div class="status__text">Checking Ceipal…</div>
         </div>
-        <div class="meta" id="apiBase">API: http://localhost:8000</div>
+        <div class="meta" id="apiBase" hidden>API: http://localhost:8000</div>
       </div>
     </aside>
 
@@ -46,8 +47,9 @@
           <div class="subtitle" id="pageSubtitle">Browse open roles and submit resumes per job.</div>
         </div>
         <div class="topbar__actions">
-          <button class="btn btn--secondary" id="refreshBtn">Refresh</button>
-          <button class="btn" id="ceipalCacheBtn">Ceipal Cache</button>
+          <button class="btn btn--secondary" id="refreshBtn">Refresh Jobs</button>
+          <!-- Ceipal Cache button hidden for production -->
+          <button class="btn" id="ceipalCacheBtn" hidden>Ceipal Cache</button>
         </div>
       </header>
 
@@ -136,7 +138,8 @@
         <div class="panel">
           <div class="panel__title">System</div>
           <div class="panel__desc">Ceipal connectivity and cached raw responses.</div>
-          <div class="row">
+          <!-- Debug buttons hidden for production -->
+          <div class="row" hidden>
             <button class="btn" id="ceipalTestBtn">Test Ceipal Auth</button>
             <button class="btn btn--secondary" id="openDocsBtn">API Docs</button>
           </div>

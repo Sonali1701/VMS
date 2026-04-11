@@ -280,6 +280,33 @@ async function apiGetAuth(path) {
   return json;
 }
 
+async function apiPatchAuth(path) {
+  const headers = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  
+  const res = await fetch(`${API_BASE}${path}`, { 
+    method: 'PATCH',
+    headers 
+  });
+  
+  if (res.status === 401) {
+    logout();
+    throw new Error('Session expired. Please login again.');
+  }
+  
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { _raw: text }; }
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.data = json;
+    throw err;
+  }
+  return json;
+}
+
 async function apiPostForm(path, formData) {
   const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: formData });
   const text = await res.text();
@@ -758,7 +785,14 @@ async function loadSubmissions() {
         <td>${c.job_id || ''}</td>
         ${isUserAdmin ? `<td><a href="#" class="vendor-name-link" data-vendor='${JSON.stringify(c.submitted_by || {}).replace(/'/g, "\\'")}' style="color: #7c3aed; text-decoration: underline; cursor: pointer;">${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</a></td>` : ''}
         <td>${c.submitted_date || ''}</td>
-        <td>${c.status || ''}</td>
+        <td>
+          <select class="status-dropdown" data-candidate-id="${c.id}" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:white;cursor:pointer;">
+            <option value="submitted" ${c.status === 'submitted' ? 'selected' : ''}>Submitted</option>
+            <option value="offer" ${c.status === 'offer' ? 'selected' : ''}>Offer</option>
+            <option value="decline" ${c.status === 'decline' ? 'selected' : ''}>Decline</option>
+            <option value="start" ${c.status === 'start' ? 'selected' : ''}>Start</option>
+          </select>
+        </td>
         <td><button class="btn btn--secondary view-resume-btn" data-path="${c.resume_path || ''}">View Resume</button></td>
       </tr>
     `).join('');
@@ -801,6 +835,22 @@ async function loadSubmissions() {
       });
     });
     
+    // Add event listeners for status dropdown changes
+    document.querySelectorAll('.status-dropdown').forEach(dropdown => {
+      dropdown.addEventListener('change', async (e) => {
+        const candidateId = e.target.dataset.candidateId;
+        const newStatus = e.target.value;
+        try {
+          await apiPatchAuth(`/api/candidates/${candidateId}/status?status=${newStatus}`);
+          showAlert('ok', `Status updated to ${newStatus}`);
+        } catch (err) {
+          showAlert('err', 'Failed to update status');
+          // Revert to original status on error
+          e.target.value = e.target.querySelector('option[selected]')?.value || 'submitted';
+        }
+      });
+    });
+    
     // Add event listeners for candidate name clicks (show candidate details)
     document.querySelectorAll('.candidate-name-link').forEach(link => {
       link.addEventListener('click', (e) => {
@@ -825,18 +875,101 @@ async function loadSubmissions() {
 }
 
 async function loadOffers() {
-  // Placeholder for offers data
-  els.offersTable.innerHTML = '<div class="empty">Offers feature coming soon. Track candidate offers sent to clients.</div>';
+  await loadCandidatesByStatus('offer', els.offersTable, 'Offers', 'Candidates with offer status.');
 }
 
 async function loadDeclines() {
-  // Placeholder for declines data
-  els.declinesTable.innerHTML = '<div class="empty">Declines feature coming soon. Track declined offers and rejections.</div>';
+  await loadCandidatesByStatus('decline', els.declinesTable, 'Declines', 'Candidates who declined or were rejected.');
 }
 
 async function loadStarts() {
-  // Placeholder for starts data
-  els.startsTable.innerHTML = '<div class="empty">Starts feature coming soon. Track candidates who have started working.</div>';
+  await loadCandidatesByStatus('start', els.startsTable, 'Starts', 'Candidates who have started working.');
+}
+
+async function loadCandidatesByStatus(status, container, title, description) {
+  container.innerHTML = '<div class="loading-jobs">Loading...</div>';
+  
+  try {
+    const data = await apiGetAuth('/api/candidates');
+    const items = (data.candidates || []).filter(c => c.status === status);
+    
+    if (!items.length) {
+      container.innerHTML = `<div class="empty">No ${title.toLowerCase()} yet.</div>`;
+      return;
+    }
+    
+    const isUserAdmin = isAdmin();
+    
+    const rows = items.map(c => `
+      <tr data-candidate='${JSON.stringify(c).replace(/'/g, "\\'")}'>
+        <td>${c.id || ''}</td>
+        <td><a href="#" class="candidate-name-link" style="color: #7c3aed; text-decoration: underline; cursor: pointer;">${c.name || ''}</a></td>
+        <td>${c.email || ''}</td>
+        <td>${c.phone || ''}</td>
+        <td>${c.job_id || ''}</td>
+        ${isUserAdmin ? `<td><a href="#" class="vendor-name-link" data-vendor='${JSON.stringify(c.submitted_by || {}).replace(/'/g, "\\'")}' style="color: #7c3aed; text-decoration: underline; cursor: pointer;">${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</a></td>` : ''}
+        <td>${c.submitted_date || ''}</td>
+        <td><button class="btn btn--secondary view-resume-btn" data-path="${c.resume_path || ''}">View Resume</button></td>
+      </tr>
+    `).join('');
+    
+    container.innerHTML = `
+      <div class="panel">
+        <div class="panel__title">${title} (${items.length})</div>
+        <div class="panel__desc">${description}</div>
+        <div class="code table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Job</th>
+                ${isUserAdmin ? '<th>Submitted By</th>' : ''}
+                <th>Submitted</th>
+                <th>Resume</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    
+    // Add event listeners
+    container.querySelectorAll('.view-resume-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const candidateId = e.target.closest('tr').querySelector('td').textContent;
+        if (candidateId) {
+          window.open(`${API_BASE}/api/resumes/${candidateId}`, '_blank');
+        }
+      });
+    });
+    
+    container.querySelectorAll('.candidate-name-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const row = e.target.closest('tr');
+        const candidateData = JSON.parse(row.dataset.candidate);
+        showCandidateDetailsModal(candidateData);
+      });
+    });
+    
+    if (isUserAdmin) {
+      container.querySelectorAll('.vendor-name-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          const vendorData = JSON.parse(e.target.dataset.vendor);
+          showVendorDetailsModal(vendorData);
+        });
+      });
+    }
+  } catch (e) {
+    container.innerHTML = `<div class="empty">Failed to load ${title.toLowerCase()}.</div>`;
+  }
 }
 
 function showCandidateDetailsModal(candidate) {
@@ -844,22 +977,22 @@ function showCandidateDetailsModal(candidate) {
   closeCandidateDetailModal();
   
   const details = `
-    <div style="margin-bottom: 16px;"><strong>ID:</strong> ${candidate.id || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Name:</strong> ${candidate.name || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Email:</strong> ${candidate.email || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Phone:</strong> ${candidate.phone || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Job ID:</strong> ${candidate.job_id || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Job Title:</strong> ${candidate.job_title || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Primary Skills:</strong> ${candidate.skills || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Location:</strong> ${candidate.location || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Experience:</strong> ${candidate.experience || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Bill Rate:</strong> ${candidate.bill_rate || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Tentative Start Date:</strong> ${candidate.tentative_start_date || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>RTO (Return to Office):</strong> ${candidate.rto || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Candidate Summary:</strong> ${candidate.candidate_summary || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Status:</strong> ${candidate.status || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Submitted Date:</strong> ${candidate.submitted_date || 'N/A'}</div>
-    <div style="margin-bottom: 16px;"><strong>Resume:</strong> <button class="btn btn--secondary" onclick="window.open('${API_BASE}/api/resumes/${candidate.id}', '_blank')">View Resume</button></div>
+    <div style="margin-bottom: 12px;"><strong>ID:</strong> ${candidate.id || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Name:</strong> ${candidate.name || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Email:</strong> ${candidate.email || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Phone:</strong> ${candidate.phone || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Job ID:</strong> ${candidate.job_id || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Job Title:</strong> ${candidate.job_title || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Primary Skills:</strong> ${candidate.primary_skills || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Location:</strong> ${candidate.current_location || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Experience:</strong> ${candidate.years_experience || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Bill Rate:</strong> ${candidate.bill_rate || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Tentative Start Date:</strong> ${candidate.tentative_start_date || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>RTO:</strong> ${candidate.rto || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Candidate Summary:</strong> ${candidate.candidate_summary || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Status:</strong> ${candidate.status || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Submitted Date:</strong> ${candidate.submitted_date || 'N/A'}</div>
+    <div style="margin-bottom: 12px;"><strong>Resume:</strong> <button class="btn btn--secondary" onclick="window.open('${API_BASE}/api/resumes/${candidate.id}', '_blank')">View Resume</button></div>
   `;
   
   const modal = document.createElement('div');
@@ -868,15 +1001,15 @@ function showCandidateDetailsModal(candidate) {
   modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:10000;display:flex;align-items:center;justify-content:center;';
   modal.innerHTML = `
     <div class="modal__overlay" onclick="closeCandidateDetailModal()" style="position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1;"></div>
-    <div class="modal__content" style="position:relative;z-index:2;max-width:600px;max-height:80vh;overflow-y:auto;background:white;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-      <div class="modal__header">
-        <h3>Candidate Details</h3>
-        <button class="modal__close" onclick="closeCandidateDetailModal()">&times;</button>
+    <div class="modal__content" style="position:relative;z-index:2;max-width:600px;max-height:85vh;background:white;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);display:flex;flex-direction:column;">
+      <div class="modal__header" style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+        <h3 style="margin:0;font-size:18px;">Candidate Details</h3>
+        <button class="modal__close" onclick="closeCandidateDetailModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#6b7280;">&times;</button>
       </div>
-      <div class="modal__body" style="padding: 20px;">
+      <div class="modal__body" style="padding:20px;overflow-y:auto;flex:1;">
         ${details}
       </div>
-      <div class="modal__footer" style="padding: 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+      <div class="modal__footer" style="padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;flex-shrink:0;">
         <button class="btn btn--secondary" onclick="closeCandidateDetailModal()">Close</button>
       </div>
     </div>
@@ -906,14 +1039,14 @@ function showVendorDetailsModal(vendor) {
   modal.innerHTML = `
     <div class="modal__overlay" onclick="closeVendorDetailModal()" style="position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1;"></div>
     <div class="modal__content" style="position:relative;z-index:2;max-width:400px;background:white;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-      <div class="modal__header">
-        <h3>Vendor Details</h3>
-        <button class="modal__close" onclick="closeVendorDetailModal()">&times;</button>
+      <div class="modal__header" style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;font-size:18px;">Vendor Details</h3>
+        <button class="modal__close" onclick="closeVendorDetailModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#6b7280;">&times;</button>
       </div>
-      <div class="modal__body" style="padding: 20px;">
+      <div class="modal__body" style="padding:20px;">
         ${details}
       </div>
-      <div class="modal__footer" style="padding: 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+      <div class="modal__footer" style="padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;">
         <button class="btn btn--secondary" onclick="closeVendorDetailModal()">Close</button>
       </div>
     </div>
