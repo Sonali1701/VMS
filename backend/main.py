@@ -719,8 +719,15 @@ class CeipalClient:
                 location_clean = location_raw.strip("[]")
                 location = location_clean
             
-            # Get the actual job description from Ceipal, fallback to building from other fields
-            full_description = job_data.get("JobDescription", "").strip()
+            # Get the actual job description from Ceipal (try multiple possible field names)
+            full_description = (
+                job_data.get("JobDescription", "").strip() or
+                job_data.get("Description", "").strip() or
+                job_data.get("PositionDescription", "").strip() or
+                job_data.get("JobRequirements", "").strip() or
+                job_data.get("Requirements", "").strip() or
+                job_data.get("Details", "").strip()
+            )
             if full_description:
                 # Clean up HTML entities that might be in the description
                 description = full_description
