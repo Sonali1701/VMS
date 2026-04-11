@@ -20,6 +20,9 @@
       <nav class="nav">
         <button class="nav__item nav__item--active" data-view="jobs">Jobs</button>
         <button class="nav__item" data-view="submissions">Submissions</button>
+        <button class="nav__item" data-view="offers">Offers</button>
+        <button class="nav__item" data-view="declines">Declines</button>
+        <button class="nav__item" data-view="starts">Starts</button>
       </nav>
 
       <div class="sidebar__footer">
@@ -102,6 +105,30 @@
           <div class="panel__title">Candidate Submissions</div>
           <div class="panel__desc">Shows submissions stored by backend (in-memory in this version).</div>
           <div id="submissionsTable"></div>
+        </div>
+      </section>
+
+      <section class="content" id="viewOffers" hidden>
+        <div class="panel">
+          <div class="panel__title">Offers</div>
+          <div class="panel__desc">Track candidate offers sent to clients.</div>
+          <div id="offersTable"></div>
+        </div>
+      </section>
+
+      <section class="content" id="viewDeclines" hidden>
+        <div class="panel">
+          <div class="panel__title">Declines</div>
+          <div class="panel__desc">Track declined offers and rejections.</div>
+          <div id="declinesTable"></div>
+        </div>
+      </section>
+
+      <section class="content" id="viewStarts" hidden>
+        <div class="panel">
+          <div class="panel__title">Starts</div>
+          <div class="panel__desc">Track candidates who have started working.</div>
+          <div id="startsTable"></div>
         </div>
       </section>
 

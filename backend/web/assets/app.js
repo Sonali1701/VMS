@@ -22,9 +22,15 @@ const els = {
   pageSubtitle: document.getElementById('pageSubtitle'),
   viewJobs: document.getElementById('viewJobs'),
   viewSubmissions: document.getElementById('viewSubmissions'),
+  viewOffers: document.getElementById('viewOffers'),
+  viewDeclines: document.getElementById('viewDeclines'),
+  viewStarts: document.getElementById('viewStarts'),
   viewSettings: document.getElementById('viewSettings'),
   viewAuth: document.getElementById('viewAuth'),
   submissionsTable: document.getElementById('submissionsTable'),
+  offersTable: document.getElementById('offersTable'),
+  declinesTable: document.getElementById('declinesTable'),
+  startsTable: document.getElementById('startsTable'),
   // Auth elements
   userInfo: document.getElementById('userInfo'),
   userName: document.getElementById('userName'),
@@ -369,6 +375,9 @@ function setView(view) {
   els.viewAuth.hidden = view !== 'auth';
   els.viewJobs.hidden = view !== 'jobs';
   els.viewSubmissions.hidden = view !== 'submissions';
+  els.viewOffers.hidden = view !== 'offers';
+  els.viewDeclines.hidden = view !== 'declines';
+  els.viewStarts.hidden = view !== 'starts';
   els.viewSettings.hidden = view !== 'settings';
 
   if (view === 'auth') {
@@ -383,6 +392,21 @@ function setView(view) {
     els.pageTitle.textContent = 'Submissions';
     els.pageSubtitle.textContent = 'Recent candidate submissions.';
     loadSubmissions();
+  }
+  if (view === 'offers') {
+    els.pageTitle.textContent = 'Offers';
+    els.pageSubtitle.textContent = 'Track candidate offers sent to clients.';
+    loadOffers();
+  }
+  if (view === 'declines') {
+    els.pageTitle.textContent = 'Declines';
+    els.pageSubtitle.textContent = 'Track declined offers and rejections.';
+    loadDeclines();
+  }
+  if (view === 'starts') {
+    els.pageTitle.textContent = 'Starts';
+    els.pageSubtitle.textContent = 'Track candidates who have started working.';
+    loadStarts();
   }
   if (view === 'settings') {
     els.pageTitle.textContent = 'System';
@@ -774,6 +798,21 @@ async function loadSubmissions() {
   } catch (e) {
     els.submissionsTable.innerHTML = `<div class="empty">Failed to load submissions.</div>`;
   }
+}
+
+async function loadOffers() {
+  // Placeholder for offers data
+  els.offersTable.innerHTML = '<div class="empty">Offers feature coming soon. Track candidate offers sent to clients.</div>';
+}
+
+async function loadDeclines() {
+  // Placeholder for declines data
+  els.declinesTable.innerHTML = '<div class="empty">Declines feature coming soon. Track declined offers and rejections.</div>';
+}
+
+async function loadStarts() {
+  // Placeholder for starts data
+  els.startsTable.innerHTML = '<div class="empty">Starts feature coming soon. Track candidates who have started working.</div>';
 }
 
 // UI events
