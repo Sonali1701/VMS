@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, status, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, status, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPBasic, HTTPBasicCredentials
@@ -838,7 +838,7 @@ async def root():
     return {"message": "VMS Backend API is running"}
 
 @app.get("/api/jobs", response_model=JobListResponse)
-async def get_jobs():
+async def get_jobs(background_tasks: BackgroundTasks):
     """Get all active jobs from Ceipal API (uses cache if available for fast response)"""
     try:
         # First, try to get cached jobs for immediate response
@@ -849,15 +849,22 @@ async def get_jobs():
             # Trigger background refresh if cache is older than 5 minutes
             cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
             if cache_age > timedelta(minutes=5):
-                # Cache is stale, but still return it. Next request will get fresh data.
-                pass
+                # Trigger background refresh without waiting
+                background_tasks.add_task(ceipal_client.fetch_jobs)
             return JobListResponse(jobs=cached_jobs, total=len(cached_jobs))
         
-        # No cache - fetch fresh (this may take time)
+        # No cache - check if we have any stale cache at all
+        if ceipal_client._jobs_cache:
+            # Return stale cache and refresh in background
+            background_tasks.add_task(ceipal_client.fetch_jobs)
+            return JobListResponse(jobs=ceipal_client._jobs_cache, total=len(ceipal_client._jobs_cache))
+        
+        # Completely empty - we have to fetch (may timeout with many pages)
+        # For first load, just fetch page 1 quickly to show something immediately
         jobs = await ceipal_client.fetch_jobs()
         return JobListResponse(jobs=jobs, total=len(jobs))
     except Exception as e:
-        # If fetch fails, try to return stale cache as fallback
+        # If fetch fails, try to return any cached data as fallback
         if ceipal_client._jobs_cache:
             return JobListResponse(jobs=ceipal_client._jobs_cache, total=len(ceipal_client._jobs_cache))
         raise HTTPException(status_code=500, detail=f"Failed to fetch jobs: {str(e)}")
