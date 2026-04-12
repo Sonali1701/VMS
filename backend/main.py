@@ -128,16 +128,13 @@ def get_db():
 
 app = FastAPI(title="VMS Backend API", version="1.0.0")
 
-# Startup event to pre-fetch jobs
+# Startup event to trigger background job fetch
 @app.on_event("startup")
 async def startup_event():
-    """Pre-fetch jobs on startup to populate cache"""
-    print("[Startup] Pre-fetching jobs from Ceipal...")
-    try:
-        jobs = await ceipal_client.fetch_jobs()
-        print(f"[Startup] Pre-fetched {len(jobs)} jobs")
-    except Exception as e:
-        print(f"[Startup] Failed to pre-fetch jobs: {e}")
+    """Trigger background job fetch on startup (non-blocking)"""
+    print("[Startup] Triggering background job fetch...")
+    # Don't block startup - just trigger the background task via a separate endpoint call
+    # The first API request to /api/jobs will trigger the actual background fetch
 
 # Web UI (HTML/CSS/JS)
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -631,6 +628,73 @@ class CeipalClient:
             # Last resort: mock jobs
             return self._get_mock_jobs()
     
+    async def fetch_all_jobs_background(self):
+        """Background task to fetch all jobs progressively and update cache"""
+        print("[Background] Starting progressive job fetch...")
+        all_jobs = []
+        
+        try:
+            token = await self.get_auth_token()
+            
+            async with httpx.AsyncClient() as client:
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+                
+                page = 1
+                has_next = True
+                total_records = 0
+                
+                while has_next:
+                    url = f"{self.reports_url}?response_type=1&page={page}"
+                    print(f"[Background] Fetching page {page}...")
+                    response = await client.get(url, headers=headers, timeout=60.0)
+                    response.raise_for_status()
+                    
+                    reports_data = response.json()
+                    
+                    if page == 1:
+                        total_records = int(reports_data.get("record_count", 0))
+                        print(f"[Background] Total records available: {total_records}")
+                    
+                    # Parse jobs from this page
+                    page_jobs = await self._parse_jobs_from_reports(reports_data)
+                    all_jobs.extend(page_jobs)
+                    print(f"[Background] Page {page}: fetched {len(page_jobs)} jobs, total so far: {len(all_jobs)}")
+                    
+                    # Update cache progressively every 5 pages or when done
+                    if page % 5 == 0 or not has_next:
+                        self._set_cached_jobs(all_jobs)
+                        self._last_fetched_pages = page
+                        self._last_total_records = total_records
+                        print(f"[Background] Cache updated with {len(all_jobs)} jobs")
+                    
+                    # Check if there's a next page
+                    has_next_page_val = reports_data.get("has_next_page")
+                    next_page_val = reports_data.get("next_page")
+                    has_next = (
+                        (has_next_page_val == 1 or has_next_page_val == "1" or has_next_page_val is True) or
+                        (next_page_val is not None and int(next_page_val) > page)
+                    )
+                    
+                    if has_next:
+                        page += 1
+                        # Small delay to avoid rate limiting
+                        await asyncio.sleep(0.5)
+                
+                # Final cache update
+                self._set_cached_jobs(all_jobs)
+                self._last_fetched_pages = page - 1
+                self._last_total_records = total_records
+                print(f"[Background] Completed fetching {len(all_jobs)} jobs from {page-1} pages")
+                
+        except Exception as e:
+            print(f"[Background] Error fetching jobs: {e}")
+            # Save whatever we got
+            if all_jobs:
+                self._set_cached_jobs(all_jobs)
+    
     async def fetch_more_jobs(self, start_page: int, max_pages: int = 25) -> List[Job]:
         """Fetch additional pages of jobs beyond initial load"""
         more_jobs: List[Job] = []
@@ -892,52 +956,30 @@ async def root():
 async def get_jobs(background_tasks: BackgroundTasks):
     """Get all active jobs from Ceipal API (uses cache if available for fast response)"""
     try:
-        # First, try to get cached jobs for immediate response
-        cached_jobs = ceipal_client._get_cached_jobs()
+        # Always return cached jobs immediately for fast response
+        cached_jobs = ceipal_client._get_cached_jobs() or ceipal_client._jobs_cache or []
         
-        if cached_jobs:
-            # Return cached jobs immediately (fast response)
-            # Trigger background refresh if cache is older than 5 minutes
-            cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
-            if cache_age > timedelta(minutes=5):
-                # Trigger background refresh without waiting
-                background_tasks.add_task(ceipal_client.fetch_jobs)
-            # Calculate pagination info based on Ceipal having more pages
-            total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
-            total_records = getattr(ceipal_client, '_last_total_records', 0)
-            jobs_fetched = len(cached_jobs)
-            # Has more if we fetched less than total records available
-            has_more = jobs_fetched < total_records and total_records > 0
-            return JobListResponse(
-                jobs=cached_jobs, 
-                total=len(cached_jobs),
-                total_pages=total_pages,
-                next_start_page=total_pages + 1,
-                has_more=has_more
-            )
+        # Trigger background refresh if cache is empty or older than 5 minutes
+        cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
+        if not cached_jobs or cache_age > timedelta(minutes=5):
+            # Trigger background fetch without waiting (progressive loading)
+            background_tasks.add_task(ceipal_client.fetch_all_jobs_background)
+            print(f"[API] Triggered background job fetch. Current cache: {len(cached_jobs)} jobs")
         
-        # No cache - check if we have any stale cache at all
-        if ceipal_client._jobs_cache:
-            # Return stale cache and refresh in background
-            background_tasks.add_task(ceipal_client.fetch_jobs)
-            total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
-            return JobListResponse(
-                jobs=ceipal_client._jobs_cache, 
-                total=len(ceipal_client._jobs_cache),
-                total_pages=total_pages,
-                next_start_page=total_pages + 1,
-                has_more=total_pages >= 25
-            )
+        # Calculate pagination info
+        total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 0
+        total_records = getattr(ceipal_client, '_last_total_records', 0)
+        jobs_fetched = len(cached_jobs)
         
-        # Completely empty - we have to fetch (may timeout with many pages)
-        jobs = await ceipal_client.fetch_jobs()
-        total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
+        # Has more if we fetched less than total records available
+        has_more = (jobs_fetched < total_records and total_records > 0) or total_pages == 0
+        
         return JobListResponse(
-            jobs=jobs, 
-            total=len(jobs),
+            jobs=cached_jobs, 
+            total=len(cached_jobs),
             total_pages=total_pages,
             next_start_page=total_pages + 1,
-            has_more=total_pages >= 25
+            has_more=has_more
         )
     except Exception as e:
         # If fetch fails, try to return any cached data as fallback
