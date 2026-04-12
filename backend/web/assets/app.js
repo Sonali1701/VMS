@@ -31,6 +31,10 @@ const els = {
   offersTable: document.getElementById('offersTable'),
   declinesTable: document.getElementById('declinesTable'),
   startsTable: document.getElementById('startsTable'),
+  // New jobs notification
+  newJobsNotification: document.getElementById('newJobsNotification'),
+  refreshNewJobsBtn: document.getElementById('refreshNewJobsBtn'),
+  dismissNewJobsBtn: document.getElementById('dismissNewJobsBtn'),
   // Auth elements
   userInfo: document.getElementById('userInfo'),
   userName: document.getElementById('userName'),
@@ -133,6 +137,8 @@ function logout() {
   currentUser = null;
   localStorage.removeItem('vms_token');
   localStorage.removeItem('vms_user');
+  // Stop polling for new jobs
+  stopNewJobsPolling();
   updateAuthUI();
 }
 
@@ -1132,6 +1138,53 @@ if (els.authToggleBtn) {
 //   }
 // });
 
+// New jobs polling - check every 2 minutes for new jobs
+let newJobsCheckInterval = null;
+
+async function checkForNewJobs() {
+  if (!authToken || !currentUser) return;
+  
+  try {
+    const data = await apiGet('/api/jobs/check-updates');
+    if (data.has_new_jobs) {
+      // Show notification
+      if (els.newJobsNotification) {
+        els.newJobsNotification.hidden = false;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to check for new jobs:', e);
+  }
+}
+
+function startNewJobsPolling() {
+  // Check immediately
+  checkForNewJobs();
+  // Then check every 2 minutes
+  newJobsCheckInterval = setInterval(checkForNewJobs, 2 * 60 * 1000); // 2 minutes
+}
+
+function stopNewJobsPolling() {
+  if (newJobsCheckInterval) {
+    clearInterval(newJobsCheckInterval);
+    newJobsCheckInterval = null;
+  }
+}
+
+// Event listeners for new jobs notification
+if (els.refreshNewJobsBtn) {
+  els.refreshNewJobsBtn.addEventListener('click', async () => {
+    els.newJobsNotification.hidden = true;
+    await loadJobs(); // Refresh jobs
+  });
+}
+
+if (els.dismissNewJobsBtn) {
+  els.dismissNewJobsBtn.addEventListener('click', () => {
+    els.newJobsNotification.hidden = true;
+  });
+}
+
 // init
 (async function init() {
   updateAuthUI();
@@ -1141,6 +1194,8 @@ if (els.authToggleBtn) {
     setView('jobs');
     await loadCeipalStatus();
     await loadJobs();
+    // Start polling for new jobs
+    startNewJobsPolling();
   } else {
     // Not logged in - show auth view
     setView('auth');

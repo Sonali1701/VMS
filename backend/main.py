@@ -560,7 +560,7 @@ class CeipalClient:
                     has_next = True
                     total_records = 0
                     
-                    while has_next and page <= 25:  # Limit to 25 pages (~500 jobs) for fast loading
+                    while has_next:  # Fetch ALL pages until has_next is false
                         # Fetch current page
                         url = f"{self.reports_url}?response_type=1&page={page}"
                         print(f"[Ceipal] Fetching page {page}...")
@@ -897,9 +897,9 @@ async def get_jobs(background_tasks: BackgroundTasks):
         
         if cached_jobs:
             # Return cached jobs immediately (fast response)
-            # Trigger background refresh if cache is older than 5 minutes
+            # Trigger background refresh if cache is older than 2 minutes
             cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
-            if cache_age > timedelta(minutes=5):
+            if cache_age > timedelta(minutes=2):
                 # Trigger background refresh without waiting
                 background_tasks.add_task(ceipal_client.fetch_jobs)
             # Calculate pagination info based on Ceipal having more pages
@@ -977,6 +977,34 @@ async def load_more_jobs(start_page: int = 26, max_pages: int = 25):
         return {"jobs": more_jobs, "total": len(more_jobs), "start_page": start_page}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load more jobs: {str(e)}")
+
+@app.get("/api/jobs/check-updates")
+async def check_job_updates():
+    """Check if there are new jobs available without fetching them"""
+    try:
+        # Get current cached job count
+        cached_jobs = ceipal_client._get_cached_jobs()
+        cached_count = len(cached_jobs) if cached_jobs else 0
+        
+        # Check if we need to refresh (cache older than 2 minutes)
+        cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
+        needs_refresh = cache_age > timedelta(minutes=2)
+        
+        # Get total records available from Ceipal (from last fetch)
+        total_records = getattr(ceipal_client, '_last_total_records', 0)
+        
+        # Calculate if there might be new jobs
+        has_new_jobs = cached_count < total_records or needs_refresh
+        
+        return {
+            "cached_count": cached_count,
+            "total_available": total_records,
+            "has_new_jobs": has_new_jobs,
+            "cache_age_seconds": cache_age.total_seconds(),
+            "needs_refresh": needs_refresh
+        }
+    except Exception as e:
+        return {"cached_count": 0, "total_available": 0, "has_new_jobs": False, "error": str(e)}
 
 @app.get("/api/ceipal/test")
 async def test_ceipal_connection():
