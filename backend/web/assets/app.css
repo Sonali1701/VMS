@@ -323,37 +323,6 @@ tbody tr:hover { background: var(--panel-2); }
   animation: spin 0.8s linear infinite;
 }
 
-/* New jobs notification banner */
-.new-jobs-notification {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 12px 20px;
-  margin: 12px 20px;
-  background: linear-gradient(135deg, #dcfce7, #bbf7d0);
-  border: 1px solid #86efac;
-  border-radius: 12px;
-  color: #166534;
-  font-weight: 500;
-}
-
-.new-jobs-notification[hidden] {
-  display: none;
-}
-
-.btn--small {
-  padding: 6px 12px;
-  font-size: 13px;
-  border-radius: 8px;
-}
-
-.btn--ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted);
-}
-
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
