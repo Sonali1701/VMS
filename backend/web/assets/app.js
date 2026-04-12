@@ -31,10 +31,6 @@ const els = {
   offersTable: document.getElementById('offersTable'),
   declinesTable: document.getElementById('declinesTable'),
   startsTable: document.getElementById('startsTable'),
-  // New jobs notification
-  newJobsNotification: document.getElementById('newJobsNotification'),
-  refreshNewJobsBtn: document.getElementById('refreshNewJobsBtn'),
-  dismissNewJobsBtn: document.getElementById('dismissNewJobsBtn'),
   // Auth elements
   userInfo: document.getElementById('userInfo'),
   userName: document.getElementById('userName'),
@@ -126,9 +122,6 @@ function updateAuthUI() {
     els.viewJobs.hidden = true;
     els.viewSubmissions.hidden = true;
     els.viewSettings.hidden = true;
-    // Hide any previous auth alerts
-    els.authAlert.hidden = true;
-    els.authAlert.textContent = '';
   }
 }
 
@@ -137,8 +130,6 @@ function logout() {
   currentUser = null;
   localStorage.removeItem('vms_token');
   localStorage.removeItem('vms_user');
-  // Stop polling for new jobs
-  stopNewJobsPolling();
   updateAuthUI();
 }
 
@@ -683,20 +674,20 @@ if (els.submitCloseBtn) {
 }
 
 async function loadJobs() {
-  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>Fetching all jobs...</small></div>';
+  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>Loading first batch...</small></div>';
   els.jobsEmpty.hidden = true;
   
   // Reset infinite scroll state
+  currentPage = 1;
   isLoadingMore = false;
   
   try {
-    // Fetch all jobs at once (backend will fetch all pages from Ceipal)
     const data = await apiGet('/api/jobs');
     allJobs = data.jobs || [];
-    // Since we fetched all jobs at start, no more to load
-    hasMoreJobs = false;
-    nextStartPage = 1;
-    console.log(`[Jobs] Loaded all ${allJobs.length} jobs.`);
+    // Use backend pagination info
+    hasMoreJobs = data.has_more || false;
+    nextStartPage = data.next_start_page || 26;
+    console.log(`[Jobs] Loaded ${allJobs.length} jobs. Has more: ${hasMoreJobs}, next start page: ${nextStartPage}`);
     renderJobs();
   } catch (e) {
     allJobs = [];
@@ -1124,66 +1115,19 @@ if (els.authToggleBtn) {
   els.authToggleBtn.addEventListener('click', toggleAuthMode);
 }
 
-// Infinite scroll disabled - all jobs fetched at once on load
-// window.addEventListener('scroll', () => {
-//   if (!hasMoreJobs || isLoadingMore) return;
-//   
-//   const scrollTop = window.scrollY || document.documentElement.scrollTop;
-//   const windowHeight = window.innerHeight;
-//   const documentHeight = document.documentElement.scrollHeight;
-//   
-//   // Load more when user scrolls to within 200px of bottom
-//   if (scrollTop + windowHeight >= documentHeight - 200) {
-//     loadMoreJobs();
-//   }
-// });
-
-// New jobs polling - check every 2 minutes for new jobs
-let newJobsCheckInterval = null;
-
-async function checkForNewJobs() {
-  if (!authToken || !currentUser) return;
+// Infinite scroll - detect when user reaches bottom of page
+window.addEventListener('scroll', () => {
+  if (!hasMoreJobs || isLoadingMore) return;
   
-  try {
-    const data = await apiGet('/api/jobs/check-updates');
-    if (data.has_new_jobs) {
-      // Show notification
-      if (els.newJobsNotification) {
-        els.newJobsNotification.hidden = false;
-      }
-    }
-  } catch (e) {
-    console.error('Failed to check for new jobs:', e);
+  const scrollTop = window.scrollY || document.documentElement.scrollTop;
+  const windowHeight = window.innerHeight;
+  const documentHeight = document.documentElement.scrollHeight;
+  
+  // Load more when user scrolls to within 200px of bottom
+  if (scrollTop + windowHeight >= documentHeight - 200) {
+    loadMoreJobs();
   }
-}
-
-function startNewJobsPolling() {
-  // Check immediately
-  checkForNewJobs();
-  // Then check every 2 minutes
-  newJobsCheckInterval = setInterval(checkForNewJobs, 2 * 60 * 1000); // 2 minutes
-}
-
-function stopNewJobsPolling() {
-  if (newJobsCheckInterval) {
-    clearInterval(newJobsCheckInterval);
-    newJobsCheckInterval = null;
-  }
-}
-
-// Event listeners for new jobs notification
-if (els.refreshNewJobsBtn) {
-  els.refreshNewJobsBtn.addEventListener('click', async () => {
-    els.newJobsNotification.hidden = true;
-    await loadJobs(); // Refresh jobs
-  });
-}
-
-if (els.dismissNewJobsBtn) {
-  els.dismissNewJobsBtn.addEventListener('click', () => {
-    els.newJobsNotification.hidden = true;
-  });
-}
+});
 
 // init
 (async function init() {
@@ -1194,8 +1138,6 @@ if (els.dismissNewJobsBtn) {
     setView('jobs');
     await loadCeipalStatus();
     await loadJobs();
-    // Start polling for new jobs
-    startNewJobsPolling();
   } else {
     // Not logged in - show auth view
     setView('auth');
