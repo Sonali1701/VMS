@@ -50,12 +50,12 @@ body {
   font-weight: 800;
 }
 .brand__logo-img {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
   object-fit: contain;
   background: white;
-  padding: 4px;
+  padding: 6px;
   box-shadow: 0 12px 26px rgba(124,58,237,0.35);
 }
 .brand__name { font-weight: 700; }
