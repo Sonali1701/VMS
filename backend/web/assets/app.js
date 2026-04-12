@@ -837,12 +837,14 @@ async function loadSubmissions() {
         ${isUserAdmin ? `<td><a href="#" class="vendor-name-link" data-vendor='${JSON.stringify(c.submitted_by || {}).replace(/'/g, "\\'")}' style="color: #7c3aed; text-decoration: underline; cursor: pointer;">${c.submitted_by?.full_name || c.submitted_by_user_id || 'Unknown'}</a></td>` : ''}
         <td>${c.submitted_date || ''}</td>
         <td>
+          ${isUserAdmin ? `
           <select class="status-dropdown" data-candidate-id="${c.id}" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:white;cursor:pointer;">
             <option value="submitted" ${c.status === 'submitted' ? 'selected' : ''}>Submitted</option>
             <option value="offer" ${c.status === 'offer' ? 'selected' : ''}>Offer</option>
             <option value="decline" ${c.status === 'decline' ? 'selected' : ''}>Decline</option>
             <option value="start" ${c.status === 'start' ? 'selected' : ''}>Start</option>
           </select>
+          ` : `<span class="status-badge status-${c.status || 'submitted'}">${(c.status || 'submitted').toUpperCase()}</span>`}
         </td>
         <td><button class="btn btn--secondary view-resume-btn" data-path="${c.resume_path || ''}">View Resume</button></td>
       </tr>
@@ -886,21 +888,23 @@ async function loadSubmissions() {
       });
     });
     
-    // Add event listeners for status dropdown changes
-    document.querySelectorAll('.status-dropdown').forEach(dropdown => {
-      dropdown.addEventListener('change', async (e) => {
-        const candidateId = e.target.dataset.candidateId;
-        const newStatus = e.target.value;
-        try {
-          await apiPatchAuth(`/api/candidates/${candidateId}/status?status=${newStatus}`);
-          showAlert('ok', `Status updated to ${newStatus}`);
-        } catch (err) {
-          showAlert('err', 'Failed to update status');
-          // Revert to original status on error
-          e.target.value = e.target.querySelector('option[selected]')?.value || 'submitted';
-        }
+    // Add event listeners for status dropdown changes (admin only)
+    if (isUserAdmin) {
+      document.querySelectorAll('.status-dropdown').forEach(dropdown => {
+        dropdown.addEventListener('change', async (e) => {
+          const candidateId = e.target.dataset.candidateId;
+          const newStatus = e.target.value;
+          try {
+            await apiPatchAuth(`/api/candidates/${candidateId}/status?status=${newStatus}`);
+            showAlert('ok', `Status updated to ${newStatus}`);
+          } catch (err) {
+            showAlert('err', 'Failed to update status');
+            // Revert to original status on error
+            e.target.value = e.target.querySelector('option[selected]')?.value || 'submitted';
+          }
+        });
       });
-    });
+    }
     
     // Add event listeners for candidate name clicks (show candidate details)
     document.querySelectorAll('.candidate-name-link').forEach(link => {
@@ -942,14 +946,18 @@ async function loadCandidatesByStatus(status, container, title, description) {
   
   try {
     const data = await apiGetAuth('/api/candidates');
-    const items = (data.candidates || []).filter(c => c.status === status);
+    const isUserAdmin = isAdmin();
+    let items = (data.candidates || []).filter(c => c.status === status);
+    
+    // For non-admin vendors, only show their own candidates
+    if (!isUserAdmin && currentUser) {
+      items = items.filter(c => c.submitted_by_user_id === currentUser.id);
+    }
     
     if (!items.length) {
       container.innerHTML = `<div class="empty">No ${title.toLowerCase()} yet.</div>`;
       return;
     }
-    
-    const isUserAdmin = isAdmin();
     
     const rows = items.map(c => `
       <tr data-candidate='${JSON.stringify(c).replace(/'/g, "\\'")}'>

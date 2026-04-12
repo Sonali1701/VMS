@@ -610,12 +610,33 @@ class CeipalClient:
                     has_next = True
                     total_records = 0
                     
+                    consecutive_429_errors = 0
+                    max_429_retries = 3
+                    
                     while has_next:  # Fetch ALL pages until has_next is false
                         # Fetch current page
                         url = f"{self.reports_url}?response_type=1&page={page}"
                         print(f"[Ceipal] Fetching page {page}...")
-                        response = await client.get(url, headers=headers, timeout=60.0)
-                        response.raise_for_status()
+                        
+                        try:
+                            response = await client.get(url, headers=headers, timeout=60.0)
+                            response.raise_for_status()
+                            consecutive_429_errors = 0  # Reset on success
+                        except httpx.HTTPStatusError as e:
+                            if e.response.status_code == 429:
+                                consecutive_429_errors += 1
+                                if consecutive_429_errors > max_429_retries:
+                                    print(f"[Ceipal] Too many 429 errors, stopping at page {page}. Got {len(all_jobs)} jobs.")
+                                    has_next = False
+                                    break
+                                
+                                # Exponential backoff
+                                wait_time = min(2 ** consecutive_429_errors, 30)
+                                print(f"[Ceipal] Rate limited (429). Waiting {wait_time}s...")
+                                await asyncio.sleep(wait_time)
+                                continue  # Retry same page
+                            else:
+                                raise  # Re-raise other errors
                         
                         reports_data = response.json()
                         
@@ -685,6 +706,8 @@ class CeipalClient:
         """Background task to fetch all jobs progressively and update cache"""
         print("[Background] Starting progressive job fetch...")
         all_jobs = []
+        consecutive_429_errors = 0
+        max_429_retries = 5
         
         try:
             token = await self.get_auth_token()
@@ -702,8 +725,26 @@ class CeipalClient:
                 while has_next:
                     url = f"{self.reports_url}?response_type=1&page={page}"
                     print(f"[Background] Fetching page {page}...")
-                    response = await client.get(url, headers=headers, timeout=60.0)
-                    response.raise_for_status()
+                    
+                    try:
+                        response = await client.get(url, headers=headers, timeout=60.0)
+                        response.raise_for_status()
+                        consecutive_429_errors = 0  # Reset on success
+                        
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 429:
+                            consecutive_429_errors += 1
+                            if consecutive_429_errors > max_429_retries:
+                                print(f"[Background] Too many 429 errors, stopping. Got {len(all_jobs)} jobs.")
+                                break
+                            
+                            # Exponential backoff: 2^errors seconds (2, 4, 8, 16, 32...)
+                            wait_time = min(2 ** consecutive_429_errors, 60)
+                            print(f"[Background] Rate limited (429). Waiting {wait_time}s before retry...")
+                            await asyncio.sleep(wait_time)
+                            continue  # Retry same page
+                        else:
+                            raise  # Re-raise other errors
                     
                     reports_data = response.json()
                     
@@ -733,8 +774,8 @@ class CeipalClient:
                     
                     if has_next:
                         page += 1
-                        # Small delay to avoid rate limiting
-                        await asyncio.sleep(0.5)
+                        # Longer delay to avoid rate limiting (2 seconds between requests)
+                        await asyncio.sleep(2.0)
                 
                 # Final cache update
                 self._set_cached_jobs(all_jobs)
@@ -751,6 +792,8 @@ class CeipalClient:
     async def fetch_more_jobs(self, start_page: int, max_pages: int = 25) -> List[Job]:
         """Fetch additional pages of jobs beyond initial load"""
         more_jobs: List[Job] = []
+        consecutive_429_errors = 0
+        max_429_retries = 3
         
         try:
             token = await self.get_auth_token()
@@ -768,8 +811,25 @@ class CeipalClient:
                 while has_next and page <= end_page:
                     url = f"{self.reports_url}?response_type=1&page={page}"
                     print(f"[Ceipal] Loading more - page {page}...")
-                    response = await client.get(url, headers=headers, timeout=60.0)
-                    response.raise_for_status()
+                    
+                    try:
+                        response = await client.get(url, headers=headers, timeout=60.0)
+                        response.raise_for_status()
+                        consecutive_429_errors = 0  # Reset on success
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 429:
+                            consecutive_429_errors += 1
+                            if consecutive_429_errors > max_429_retries:
+                                print(f"[Ceipal] Too many 429 errors, stopping. Got {len(more_jobs)} jobs.")
+                                break
+                            
+                            # Exponential backoff
+                            wait_time = min(2 ** consecutive_429_errors, 30)
+                            print(f"[Ceipal] Rate limited (429). Waiting {wait_time}s...")
+                            await asyncio.sleep(wait_time)
+                            continue  # Retry same page
+                        else:
+                            raise
                     
                     reports_data = response.json()
                     page_jobs = await self._parse_jobs_from_reports(reports_data)
@@ -1332,17 +1392,17 @@ async def update_candidate_status(
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update candidate status. Vendors can only update their own candidates."""
+    """Update candidate status. Only admin can update status."""
     try:
         # Find the candidate
         candidate = db.query(CandidateDB).filter(CandidateDB.id == candidate_id).first()
         if not candidate:
             raise HTTPException(status_code=404, detail="Candidate not found")
         
-        # Check permissions - only admin or the vendor who submitted can update
+        # Check permissions - only admin can update status
         is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
-        if not is_admin and candidate.submitted_by_user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="You can only update your own candidates")
+        if not is_admin:
+            raise HTTPException(status_code=403, detail="Only admin can update candidate status")
         
         # Validate status
         valid_statuses = ["submitted", "offer", "decline", "start"]

@@ -82,6 +82,13 @@ body {
 .status__dot--ok { background: var(--ok); }
 .status__dot--bad { background: var(--danger); }
 .status__text { font-size: 13px; color: var(--muted); }
+
+/* Status badges for vendor view (read-only status display) */
+.status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+.status-submitted { background: #e0e7ff; color: #3730a3; }
+.status-offer { background: #d1fae5; color: #065f46; }
+.status-decline { background: #fee2e2; color: #991b1b; }
+.status-start { background: #dbeafe; color: #1e40af; }
 .meta { font-size: 12px; color: var(--muted-2); }
 
 .main { padding: 22px 24px; overflow: auto; }
