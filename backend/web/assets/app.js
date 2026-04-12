@@ -38,10 +38,7 @@ const els = {
   authTitle: document.getElementById('authTitle'),
   authEmail: document.getElementById('authEmail'),
   authPassword: document.getElementById('authPassword'),
-  authFullName: document.getElementById('authFullName'),
-  registerFields: document.getElementById('registerFields'),
   authSubmitBtn: document.getElementById('authSubmitBtn'),
-  authToggleBtn: document.getElementById('authToggleBtn'),
   authAlert: document.getElementById('authAlert'),
   // Job Detail Modal
   jobDetailModal: document.getElementById('jobDetailModal'),
@@ -136,14 +133,8 @@ function logout() {
   updateAuthUI();
 }
 
-function toggleAuthMode() {
-  isRegisterMode = !isRegisterMode;
-  els.authTitle.textContent = isRegisterMode ? 'Register' : 'Login';
-  els.authSubmitBtn.textContent = isRegisterMode ? 'Register' : 'Login';
-  els.authToggleBtn.textContent = isRegisterMode ? 'Back to Login' : 'Register';
-  els.registerFields.hidden = !isRegisterMode;
-  clearAuthAlert();
-}
+// Register mode removed - only login allowed for whitelisted users
+// function toggleAuthMode() { }
 
 async function handleAuthSubmit() {
   clearAuthAlert();
@@ -154,11 +145,8 @@ async function handleAuthSubmit() {
   if (!email) return showAuthAlert('error', 'Email is required');
   if (!password) return showAuthAlert('error', 'Password is required');
   
-  const body = isRegisterMode 
-    ? { email, password, full_name: els.authFullName.value.trim() }
-    : { email, password };
-  
-  const endpoint = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
+  const body = { email, password };
+  const endpoint = '/api/auth/login';
   
   try {
     const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -189,10 +177,9 @@ async function handleAuthSubmit() {
     // Clear form
     els.authEmail.value = '';
     els.authPassword.value = '';
-    els.authFullName.value = '';
     
     // Show success message briefly then switch to jobs
-    showAuthAlert('ok', isRegisterMode ? 'Registered successfully!' : 'Logged in successfully!');
+    showAuthAlert('ok', 'Logged in successfully!');
     
     setTimeout(async () => {
       updateAuthUI();
@@ -1168,9 +1155,10 @@ if (els.authSubmitBtn) {
   els.authSubmitBtn.addEventListener('click', handleAuthSubmit);
 }
 
-if (els.authToggleBtn) {
-  els.authToggleBtn.addEventListener('click', toggleAuthMode);
-}
+// Register toggle removed - only login allowed
+// if (els.authToggleBtn) {
+//   els.authToggleBtn.addEventListener('click', toggleAuthMode);
+// }
 
 // Infinite scroll disabled - all jobs fetched at once on load
 // window.addEventListener('scroll', () => {
