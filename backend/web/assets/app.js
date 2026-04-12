@@ -122,6 +122,9 @@ function updateAuthUI() {
     els.viewJobs.hidden = true;
     els.viewSubmissions.hidden = true;
     els.viewSettings.hidden = true;
+    // Hide any previous auth alerts
+    els.authAlert.hidden = true;
+    els.authAlert.textContent = '';
   }
 }
 
@@ -674,20 +677,20 @@ if (els.submitCloseBtn) {
 }
 
 async function loadJobs() {
-  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>Loading first batch...</small></div>';
+  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>Fetching all jobs...</small></div>';
   els.jobsEmpty.hidden = true;
   
   // Reset infinite scroll state
-  currentPage = 1;
   isLoadingMore = false;
   
   try {
+    // Fetch all jobs at once (backend will fetch all pages from Ceipal)
     const data = await apiGet('/api/jobs');
     allJobs = data.jobs || [];
-    // Use backend pagination info
-    hasMoreJobs = data.has_more || false;
-    nextStartPage = data.next_start_page || 26;
-    console.log(`[Jobs] Loaded ${allJobs.length} jobs. Has more: ${hasMoreJobs}, next start page: ${nextStartPage}`);
+    // Since we fetched all jobs at start, no more to load
+    hasMoreJobs = false;
+    nextStartPage = 1;
+    console.log(`[Jobs] Loaded all ${allJobs.length} jobs.`);
     renderJobs();
   } catch (e) {
     allJobs = [];
@@ -1115,19 +1118,19 @@ if (els.authToggleBtn) {
   els.authToggleBtn.addEventListener('click', toggleAuthMode);
 }
 
-// Infinite scroll - detect when user reaches bottom of page
-window.addEventListener('scroll', () => {
-  if (!hasMoreJobs || isLoadingMore) return;
-  
-  const scrollTop = window.scrollY || document.documentElement.scrollTop;
-  const windowHeight = window.innerHeight;
-  const documentHeight = document.documentElement.scrollHeight;
-  
-  // Load more when user scrolls to within 200px of bottom
-  if (scrollTop + windowHeight >= documentHeight - 200) {
-    loadMoreJobs();
-  }
-});
+// Infinite scroll disabled - all jobs fetched at once on load
+// window.addEventListener('scroll', () => {
+//   if (!hasMoreJobs || isLoadingMore) return;
+//   
+//   const scrollTop = window.scrollY || document.documentElement.scrollTop;
+//   const windowHeight = window.innerHeight;
+//   const documentHeight = document.documentElement.scrollHeight;
+//   
+//   // Load more when user scrolls to within 200px of bottom
+//   if (scrollTop + windowHeight >= documentHeight - 200) {
+//     loadMoreJobs();
+//   }
+// });
 
 // init
 (async function init() {
