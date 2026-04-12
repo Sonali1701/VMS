@@ -189,13 +189,13 @@ class Job(BaseModel):
     id: str
     title: str
     description: str
+    requirements: Optional[str] = None
     department: str
     location: str
     employment_type: str
     salary_range: Optional[str] = None
     posted_date: datetime
     status: str
-    requirements: Optional[str] = None
 
 class Candidate(BaseModel):
     id: str
@@ -727,18 +727,19 @@ class CeipalClient:
                 location_clean = location_raw.strip("[]")
                 location = location_clean
             
-            # Get the actual job description from Ceipal (try multiple possible field names)
-            full_description = (
-                job_data.get("JobDescription", "").strip() or
-                job_data.get("Description", "").strip() or
-                job_data.get("PositionDescription", "").strip() or
-                job_data.get("JobRequirements", "").strip() or
-                job_data.get("Requirements", "").strip() or
-                job_data.get("Details", "").strip()
-            )
-            if full_description:
-                # Clean up HTML entities that might be in the description
-                description = full_description
+            # Get the actual job description from Ceipal
+            job_description = job_data.get("JobDescription", "").strip()
+            requirements = job_data.get("Requirements", "").strip() or job_data.get("JobRequirements", "").strip()
+            
+            # Combine description and requirements for full details
+            full_description_parts = []
+            if job_description:
+                full_description_parts.append(job_description)
+            if requirements:
+                full_description_parts.append(f"Requirements:\n{requirements}")
+            
+            if full_description_parts:
+                description = "\n\n".join(full_description_parts)
             else:
                 # Build description from available fields as fallback
                 description_parts = []
@@ -809,13 +810,13 @@ class CeipalClient:
                 id=actual_job_code,
                 title=job_data.get("JobTitle", "Position Not Specified"),
                 description=description,
+                requirements=requirements,
                 department=f"Job Code: {actual_job_code}",
                 location=location if location else "Not specified",
                 employment_type=job_data.get("Duration", "Contract"),  # Duration as employment type
                 salary_range=salary_range_display,  # Show updated rate to vendors
                 posted_date=self._parse_date(job_data.get("JobCreated", job_data.get("CreatedDate"))),
-                status=job_data.get("JobStatus", "Open"),
-                requirements=f"Bill Rate: {salary_range_display} | Manager: {job_data.get('RecruitmentManager', 'N/A')}"
+                status=job_data.get("JobStatus", "Open")
             )
             jobs.append(job)
             
