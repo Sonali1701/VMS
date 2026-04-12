@@ -142,13 +142,26 @@ def get_db():
 
 app = FastAPI(title="VMS Backend API", version="1.0.0")
 
-# Startup event to trigger background job fetch
+# Background task to fetch jobs continuously
+async def scheduled_job_fetch():
+    """Fetch jobs every 5 minutes in background"""
+    while True:
+        try:
+            print("[Scheduled] Starting background job fetch...")
+            await ceipal_client.fetch_all_jobs_background()
+            print("[Scheduled] Background job fetch completed")
+        except Exception as e:
+            print(f"[Scheduled] Error in background fetch: {e}")
+        
+        # Wait 5 minutes before next fetch
+        await asyncio.sleep(300)
+
 @app.on_event("startup")
 async def startup_event():
-    """Trigger background job fetch on startup (non-blocking)"""
-    print("[Startup] Triggering background job fetch...")
-    # Don't block startup - just trigger the background task via a separate endpoint call
-    # The first API request to /api/jobs will trigger the actual background fetch
+    """Start background job fetch on startup"""
+    print("[Startup] Starting scheduled background job fetch...")
+    # Start the continuous background fetch task
+    asyncio.create_task(scheduled_job_fetch())
 
 # Web UI (HTML/CSS/JS)
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
@@ -338,10 +351,31 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    """Login user and return JWT token"""
+    """Login user and return JWT token - auto-creates whitelisted users on first login"""
     user = db.query(UserDB).filter(UserDB.email == user_data.email).first()
+    
+    # If user doesn't exist, check if email is whitelisted and auto-create
     if not user:
-        raise HTTPException(status_code=401, detail="Incorrect email or password")
+        if user_data.email.lower() not in WHITELISTED_USERS:
+            raise HTTPException(status_code=401, detail="Incorrect email or password")
+        
+        # Auto-create user on first login (whitelisted email)
+        print(f"[Auth] Auto-creating new user: {user_data.email}")
+        user_id = str(uuid4())
+        hashed_password = get_password_hash(user_data.password)
+        
+        user = UserDB(
+            id=user_id,
+            email=user_data.email,
+            full_name=user_data.email.split('@')[0],  # Use email prefix as default name
+            hashed_password=hashed_password,
+            is_active="true"
+        )
+        
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        print(f"[Auth] User created successfully: {user_data.email}")
     
     if not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
