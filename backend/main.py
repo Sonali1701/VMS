@@ -132,8 +132,10 @@ app = FastAPI(title="VMS Backend API", version="1.0.0")
 @app.on_event("startup")
 async def startup_event():
     """Pre-fetch jobs on startup to populate cache"""
-    print("[Startup] Pre-fetching jobs from Ceipal...")
+    print("[Startup] Clearing cache and pre-fetching jobs from Ceipal...")
     try:
+        # Clear cache to force fresh fetch with descriptions
+        ceipal_client.clear_cache()
         jobs = await ceipal_client.fetch_jobs()
         print(f"[Startup] Pre-fetched {len(jobs)} jobs")
     except Exception as e:
@@ -737,8 +739,8 @@ class CeipalClient:
                 job_data.get("Details", "").strip()
             )
             if full_description:
-                # Clean up HTML entities that might be in the description
-                description = full_description
+                # Clean up HTML entities and normalize newlines
+                description = full_description.replace('\\n', '\n').replace('\\r', '').strip()
             else:
                 # Build description from available fields as fallback
                 description_parts = []
@@ -803,6 +805,10 @@ class CeipalClient:
             
             # Get actual job code
             actual_job_code = str(job_data.get("JobCode", f"job_{len(jobs)+1}"))
+            
+            # Debug: print first 100 chars of description
+            if len(jobs) < 3 and description:
+                print(f"[Ceipal] Job {actual_job_code} description (first 100 chars): {description[:100]}...")
             
             # Map Ceipal fields to our Job model
             job = Job(

@@ -366,6 +366,7 @@ function renderJobs() {
 
     const desc = document.createElement('div');
     desc.className = 'card__desc';
+    desc.style.whiteSpace = 'pre-wrap';
     const d = (job.description || '').toString();
     desc.textContent = d.length > 260 ? `${d.slice(0, 260)}…` : d;
 
@@ -468,6 +469,8 @@ function openJobDetailModal(job) {
   ].filter(Boolean);
   els.jobDetailMeta.textContent = parts.join(' • ') || '—';
   
+  // Use innerHTML with pre-wrap style to preserve newlines
+  els.jobDetailFullDesc.style.whiteSpace = 'pre-wrap';
   els.jobDetailFullDesc.textContent = job.description || 'No description available.';
   els.jobDetailRequirements.textContent = job.requirements || 'No requirements specified.';
   
