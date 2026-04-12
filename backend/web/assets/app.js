@@ -684,6 +684,8 @@ if (els.submitCloseBtn) {
   els.submitCloseBtn.addEventListener('click', () => submitResume({ closeAfter: true }));
 }
 
+let jobsPollInterval = null;
+
 async function loadJobs() {
   els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>Fetching all jobs...</small></div>';
   els.jobsEmpty.hidden = true;
@@ -691,15 +693,59 @@ async function loadJobs() {
   // Reset infinite scroll state
   isLoadingMore = false;
   
+  // Clear any existing poll
+  if (jobsPollInterval) {
+    clearInterval(jobsPollInterval);
+    jobsPollInterval = null;
+  }
+  
   try {
-    // Fetch all jobs at once (backend will fetch all pages from Ceipal)
+    // Fetch jobs (returns immediately with cached data, background fetch continues)
     const data = await apiGet('/api/jobs');
     allJobs = data.jobs || [];
-    // Since we fetched all jobs at start, no more to load
-    hasMoreJobs = false;
-    nextStartPage = 1;
-    console.log(`[Jobs] Loaded all ${allJobs.length} jobs.`);
+    hasMoreJobs = data.has_more || false;
+    console.log(`[Jobs] Loaded ${allJobs.length} jobs. Has more: ${hasMoreJobs}`);
     renderJobs();
+    
+    // If no jobs yet or still fetching more, start polling
+    if (allJobs.length === 0 || hasMoreJobs) {
+      let pollCount = 0;
+      const maxPolls = 60; // Poll for up to 3 minutes (60 * 3s)
+      
+      jobsPollInterval = setInterval(async () => {
+        pollCount++;
+        console.log(`[Jobs] Polling for jobs... attempt ${pollCount}`);
+        
+        try {
+          const pollData = await apiGet('/api/jobs');
+          const newJobs = pollData.jobs || [];
+          
+          if (newJobs.length > allJobs.length) {
+            // New jobs found!
+            allJobs = newJobs;
+            hasMoreJobs = pollData.has_more || false;
+            console.log(`[Jobs] Updated: now ${allJobs.length} jobs`);
+            renderJobs();
+          }
+          
+          // Stop polling if we have jobs and no more to fetch
+          if (allJobs.length > 0 && !hasMoreJobs) {
+            console.log('[Jobs] All jobs loaded, stopping poll');
+            clearInterval(jobsPollInterval);
+            jobsPollInterval = null;
+          }
+          
+          // Stop after max polls to avoid infinite polling
+          if (pollCount >= maxPolls) {
+            console.log('[Jobs] Max polls reached, stopping');
+            clearInterval(jobsPollInterval);
+            jobsPollInterval = null;
+          }
+        } catch (err) {
+          console.error('[Jobs] Poll error:', err);
+        }
+      }, 3000); // Poll every 3 seconds
+    }
   } catch (e) {
     allJobs = [];
     hasMoreJobs = false;
