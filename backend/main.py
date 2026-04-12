@@ -23,6 +23,20 @@ import asyncio
 # Load environment variables
 load_dotenv()
 
+# Load whitelisted users from Users file
+WHITELISTED_USERS = set()
+try:
+    users_file_path = os.path.join(os.path.dirname(__file__), "..", "Users")
+    if os.path.exists(users_file_path):
+        with open(users_file_path, "r") as f:
+            for line in f:
+                email = line.strip()
+                if email and not email.startswith("#"):
+                    WHITELISTED_USERS.add(email.lower())
+    print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users")
+except Exception as e:
+    print(f"[Auth] Error loading Users file: {e}")
+
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////opt/render/project/src/data/vms.db")
 # Ensure directory exists for SQLite
@@ -168,7 +182,8 @@ ATS_API_KEY = os.getenv("ATS_API_KEY", "")
 
 # Ceipal API Configuration
 CEIPAL_AUTH_URL = os.getenv("CEIPAL_AUTH_URL", "https://api.ceipal.com/v1/createAuthtoken/")
-CEIPAL_REPORTS_URL = os.getenv("CEIPAL_REPORTS_URL", "https://bi.ceipal.com/ReportDetails/getReportsData/d2RyRHN0Z0s3R29aNWdyN1h2TnBLUT09")
+# New API endpoint with 50 limit
+CEIPAL_REPORTS_URL = os.getenv("CEIPAL_REPORTS_URL", "https://bi.ceipal.com/ReportDetails/getReportsData/ekZMUmhQVVhCNzRhbzcwcEpwZnN6Zz09")
 CEIPAL_EMAIL = os.getenv("CEIPAL_EMAIL", "amir@radixsol.com")
 CEIPAL_PASSWORD = os.getenv("CEIPAL_PASSWORD", "")
 CEIPAL_API_KEY = os.getenv("CEIPAL_API_KEY", "2693f0ed28f2250811fe40294e97e108a56afa9043e5336da4")
@@ -280,7 +295,11 @@ async def get_current_user(token: str = Depends(HTTPBearer()), db: Session = Dep
 # Auth Endpoints
 @app.post("/api/auth/register", response_model=Token)
 async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    """Register a new user"""
+    """Register a new user - only whitelisted emails allowed"""
+    # Check if email is in whitelist
+    if user_data.email.lower() not in WHITELISTED_USERS:
+        raise HTTPException(status_code=403, detail="Email not authorized. Contact admin for access.")
+    
     # Check if user already exists
     existing_user = db.query(UserDB).filter(UserDB.email == user_data.email).first()
     if existing_user:

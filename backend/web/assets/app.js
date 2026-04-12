@@ -348,7 +348,15 @@ function renderJobs() {
   els.jobsGrid.innerHTML = '';
   const filtered = allJobs.filter(jobMatches);
 
-  els.jobsEmpty.hidden = filtered.length !== 0;
+  // Show/hide empty state and update message
+  if (filtered.length === 0) {
+    els.jobsEmpty.hidden = false;
+    // If jobs are still loading (allJobs is empty), show loading message
+    // If jobs loaded but none match filter, show no jobs message
+    els.jobsEmpty.textContent = allJobs.length === 0 ? 'Jobs loading...' : 'No jobs found.';
+  } else {
+    els.jobsEmpty.hidden = true;
+  }
 
   for (const job of filtered) {
     const card = document.createElement('div');

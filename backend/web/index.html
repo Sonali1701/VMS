@@ -18,7 +18,7 @@
       </div>
 
       <nav class="nav">
-        <button class="nav__item nav__item--active" data-view="jobs">Jobs</button>
+        <button class="nav__item nav__item--active" data-view="jobs">Open Hot Jobs</button>
         <button class="nav__item" data-view="submissions">Submissions</button>
         <button class="nav__item" data-view="offers">Offers</button>
         <button class="nav__item" data-view="declines">Declines</button>
@@ -43,11 +43,11 @@
     <main class="main">
       <header class="topbar">
         <div>
-          <h1 class="title" id="pageTitle">Jobs</h1>
-          <div class="subtitle" id="pageSubtitle">Browse open roles and submit resumes per job.</div>
+          <h1 class="title" id="pageTitle">Open Hot Jobs</h1>
+          <div class="subtitle" id="pageSubtitle">Browse open hot roles and submit resumes per job.</div>
         </div>
         <div class="topbar__actions">
-          <button class="btn btn--secondary" id="refreshBtn">Refresh Jobs</button>
+          <button class="btn btn--secondary" id="refreshBtn">Refresh Open Hot Jobs</button>
           <!-- Ceipal Cache button hidden for production -->
           <button class="btn" id="ceipalCacheBtn" hidden>Ceipal Cache</button>
         </div>
@@ -60,12 +60,6 @@
           <div class="panel__desc">Enter your credentials to continue</div>
           
           <div class="form" style="margin-top: 24px;">
-            <div id="registerFields" hidden>
-              <div class="field">
-                <label>Full Name</label>
-                <input id="authFullName" class="input" placeholder="Your full name" />
-              </div>
-            </div>
             <div class="field">
               <label>Email</label>
               <input id="authEmail" class="input" type="email" placeholder="name@example.com" />
@@ -77,7 +71,6 @@
             <div class="alert" id="authAlert" hidden></div>
             <div class="row" style="gap: 12px; margin-top: 20px;">
               <button class="btn" id="authSubmitBtn" style="flex: 1;">Login</button>
-              <button class="btn btn--secondary" id="authToggleBtn" style="flex: 1;">Register</button>
             </div>
           </div>
         </div>
@@ -100,7 +93,7 @@
         </div>
 
         <div class="grid" id="jobsGrid"></div>
-        <div class="empty" id="jobsEmpty" hidden>No jobs found.</div>
+        <div class="empty" id="jobsEmpty">Jobs loading...</div>
       </section>
 
       <section class="content" id="viewSubmissions" hidden>
