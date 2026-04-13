@@ -934,7 +934,8 @@ class CeipalClient:
                         
                         # Get total records from first page
                         if page == 1:
-                            total_records = int(reports_data.get("record_count", 0))
+                            record_count_str = reports_data.get("record_count", "0") or "0"
+                            total_records = int(record_count_str) if record_count_str.strip() else 0
                             print(f"[Ceipal] Total records available: {total_records}")
                             self._write_json_cache(
                                 "ceipal_reports_last.json",
@@ -1041,7 +1042,8 @@ class CeipalClient:
                     reports_data = response.json()
                     
                     if page == 1:
-                        total_records = int(reports_data.get("record_count", 0))
+                        record_count_str = reports_data.get("record_count", "0") or "0"
+                        total_records = int(record_count_str) if record_count_str.strip() else 0
                         print(f"[Background] Total records available: {total_records}")
                     
                     # Parse jobs from this page
