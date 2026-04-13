@@ -37,6 +37,34 @@ try:
 except Exception as e:
     print(f"[Auth] Error loading Users file: {e}")
 
+# JSON-based user storage for persistence without disk
+USERS_JSON_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "users.json")
+
+def load_users_from_json():
+    """Load users from JSON file"""
+    if os.path.exists(USERS_JSON_FILE):
+        try:
+            with open(USERS_JSON_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[Auth] Error loading users JSON: {e}")
+    return {}
+
+def save_users_to_json(users):
+    """Save users to JSON file"""
+    try:
+        os.makedirs(os.path.dirname(USERS_JSON_FILE), exist_ok=True)
+        with open(USERS_JSON_FILE, "w") as f:
+            json.dump(users, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"[Auth] Error saving users JSON: {e}")
+        return False
+
+# In-memory user cache (loaded from JSON on startup)
+_users_cache = load_users_from_json()
+print(f"[Auth] Loaded {len(_users_cache)} users from JSON storage")
+
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////opt/render/project/src/data/vms.db")
 # Ensure directory exists for SQLite
@@ -119,18 +147,21 @@ class CandidateDB(Base):
     rto = Column(String, nullable=False)
     candidate_summary = Column(String, nullable=False)
 
-# Optional: Delete old database on startup (for Render migration)
-if os.getenv("DELETE_DB_ON_START") == "true":
-    # Handle both relative and absolute paths (sqlite:/// vs sqlite:////)
-    db_path = DATABASE_URL.replace("sqlite://", "").lstrip("/")
-    if not db_path.startswith("/"):  # relative path
-        db_path = "/" + db_path
-    if os.path.exists(db_path):
-        os.remove(db_path)
-        print(f"[MIGRATION] Deleted old database: {db_path}")
-
 # Create tables
 Base.metadata.create_all(bind=engine)
+
+# Log database status on startup
+try:
+    db_path = DATABASE_URL.replace("sqlite://", "").lstrip("/")
+    if not db_path.startswith("/"):
+        db_path = "/" + db_path
+    if os.path.exists(db_path):
+        db_size = os.path.getsize(db_path)
+        print(f"[DB] Database exists: {db_path} ({db_size} bytes)")
+    else:
+        print(f"[DB] Database will be created at: {db_path}")
+except Exception as e:
+    print(f"[DB] Error checking database: {e}")
 
 # Dependency to get DB session
 def get_db():
@@ -283,7 +314,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(HTTPBearer()), db: Session = Depends(get_db)) -> UserDB:
+async def get_current_user(token: str = Depends(HTTPBearer())):
+    """Get current user from JSON storage"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -298,65 +330,81 @@ async def get_current_user(token: str = Depends(HTTPBearer()), db: Session = Dep
     except JWTError:
         raise credentials_exception
     
-    user = db.query(UserDB).filter(UserDB.email == token_data.email).first()
+    # Load fresh from JSON to ensure we have latest data
+    users = load_users_from_json()
+    user = users.get(token_data.email.lower())
+    
     if user is None:
         raise credentials_exception
-    if user.is_active != "true":
+    if user.get("is_active") != "true":
         raise HTTPException(status_code=400, detail="Inactive user")
-    return user
+    
+    # Return as dict-like object for compatibility
+    return type('User', (), {
+        'id': user["id"],
+        'email': user["email"],
+        'full_name': user["full_name"],
+        'is_active': user["is_active"],
+        'hashed_password': user["hashed_password"]
+    })()
 
 # Auth Endpoints
 @app.post("/api/auth/register", response_model=Token)
-async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    """Register a new user - only whitelisted emails allowed"""
+async def register(user_data: UserCreate):
+    """Register a new user - only whitelisted emails allowed (JSON storage)"""
+    global _users_cache
+    
     # Check if email is in whitelist
     if user_data.email.lower() not in WHITELISTED_USERS:
         raise HTTPException(status_code=403, detail="Email not authorized. Contact admin for access.")
     
     # Check if user already exists
-    existing_user = db.query(UserDB).filter(UserDB.email == user_data.email).first()
-    if existing_user:
+    if user_data.email.lower() in _users_cache:
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # Create new user
     user_id = str(uuid4())
     hashed_password = get_password_hash(user_data.password)
     
-    db_user = UserDB(
-        id=user_id,
-        email=user_data.email,
-        full_name=user_data.full_name,
-        hashed_password=hashed_password,
-        is_active="true"
-    )
+    user = {
+        "id": user_id,
+        "email": user_data.email,
+        "full_name": user_data.full_name,
+        "hashed_password": hashed_password,
+        "is_active": "true",
+        "created_at": datetime.now().isoformat()
+    }
     
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    # Save to JSON file
+    _users_cache[user_data.email.lower()] = user
+    save_users_to_json(_users_cache)
     
     # Create access token
-    access_token = create_access_token(data={"sub": db_user.email})
+    access_token = create_access_token(data={"sub": user["email"]})
     
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": {
-            "id": db_user.id,
-            "email": db_user.email,
-            "full_name": db_user.full_name,
-            "is_active": db_user.is_active,
-            "created_at": db_user.created_at
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "is_active": user["is_active"],
+            "created_at": user["created_at"]
         }
     }
 
 @app.post("/api/auth/login", response_model=Token)
-async def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    """Login user and return JWT token - auto-creates whitelisted users on first login"""
-    user = db.query(UserDB).filter(UserDB.email == user_data.email).first()
+async def login(user_data: UserLogin):
+    """Login user and return JWT token - auto-creates whitelisted users on first login (JSON storage)"""
+    global _users_cache
+    
+    email_lower = user_data.email.lower()
+    user = _users_cache.get(email_lower)
     
     # If user doesn't exist, check if email is whitelisted and auto-create
     if not user:
-        if user_data.email.lower() not in WHITELISTED_USERS:
+        if email_lower not in WHITELISTED_USERS:
             raise HTTPException(status_code=401, detail="Incorrect email or password")
         
         # Auto-create user on first login (whitelisted email)
@@ -364,37 +412,38 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
         user_id = str(uuid4())
         hashed_password = get_password_hash(user_data.password)
         
-        user = UserDB(
-            id=user_id,
-            email=user_data.email,
-            full_name=user_data.email.split('@')[0],  # Use email prefix as default name
-            hashed_password=hashed_password,
-            is_active="true"
-        )
+        user = {
+            "id": user_id,
+            "email": user_data.email,
+            "full_name": user_data.email.split('@')[0],
+            "hashed_password": hashed_password,
+            "is_active": "true",
+            "created_at": datetime.now().isoformat()
+        }
         
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        # Save to JSON file for persistence
+        _users_cache[email_lower] = user
+        save_users_to_json(_users_cache)
         print(f"[Auth] User created successfully: {user_data.email}")
     
-    if not verify_password(user_data.password, user.hashed_password):
+    if not verify_password(user_data.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     
-    if user.is_active != "true":
+    if user["is_active"] != "true":
         raise HTTPException(status_code=400, detail="Inactive user")
     
     # Create access token
-    access_token = create_access_token(data={"sub": user.email})
+    access_token = create_access_token(data={"sub": user["email"]})
     
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": {
-            "id": user.id,
-            "email": user.email,
-            "full_name": user.full_name,
-            "is_active": user.is_active,
-            "created_at": user.created_at
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "is_active": user["is_active"],
+            "created_at": user["created_at"]
         }
     }
 
