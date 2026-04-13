@@ -890,7 +890,7 @@ async function loadJobs() {
   
   try {
     // Fetch jobs (returns immediately with cached data, background fetch continues)
-    const data = await apiGet('/api/jobs');
+    const data = await apiGetAuth('/api/jobs');
     allJobs = data.jobs || [];
     hasMoreJobs = data.has_more || false;
     console.log(`[Jobs] Loaded ${allJobs.length} jobs. Has more: ${hasMoreJobs}`);
@@ -906,7 +906,7 @@ async function loadJobs() {
         console.log(`[Jobs] Polling for jobs... attempt ${pollCount}`);
         
         try {
-          const pollData = await apiGet('/api/jobs');
+          const pollData = await apiGetAuth('/api/jobs');
           const newJobs = pollData.jobs || [];
           
           if (newJobs.length > allJobs.length) {
