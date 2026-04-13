@@ -1122,7 +1122,7 @@ async function loadSubmissions() {
     document.querySelectorAll('.vendor-name-link').forEach(link => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
-        const vendorData = JSON.parse(e.target.dataset.vendor);
+        const vendorData = JSON.parse(e.currentTarget.dataset.vendor);
         showVendorDetailsModal(vendorData);
       });
     });
@@ -1223,7 +1223,7 @@ async function loadCandidatesByStatus(status, container, title, description) {
       container.querySelectorAll('.vendor-name-link').forEach(link => {
         link.addEventListener('click', (e) => {
           e.preventDefault();
-          const vendorData = JSON.parse(e.target.dataset.vendor);
+          const vendorData = JSON.parse(e.currentTarget.dataset.vendor);
           showVendorDetailsModal(vendorData);
         });
       });

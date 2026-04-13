@@ -679,6 +679,30 @@ async def get_current_user_info(current_user: UserDB = Depends(get_current_user)
 
 # Admin configuration
 ADMIN_EMAIL = "Admin@radixsol.com"
+
+# Client names to filter from job descriptions (hidden from vendors)
+CLIENT_NAMES_TO_FILTER = [
+    "Adaptive", "AHSA", "CareerStaff", "HWL", "Medefis", "Staffing Engine",
+    "Aya", "Dedicated Nurses", "Hallmark and Vibra Healthcare", "Focusoneconnect",
+    "RTG Medical", "Stability Healthcare", "Sunburst Workforce Solutions",
+    "Supplemental Healthcare", "TRS Healthcare", "Windsor", "Expedient",
+    "Snapcare", "MedicalSolutions", "OHT", "Gracedale"
+]
+
+def sanitize_job_description(description: str, is_admin: bool = False) -> str:
+    """Remove client names from job description for non-admin users"""
+    if is_admin or not description:
+        return description
+    
+    sanitized = description
+    for client_name in CLIENT_NAMES_TO_FILTER:
+        # Case-insensitive replacement with word boundaries
+        import re
+        pattern = r'\b' + re.escape(client_name) + r'\b'
+        sanitized = re.sub(pattern, '[Client Name Hidden]', sanitized, flags=re.IGNORECASE)
+    
+    return sanitized
+
 if os.path.isdir(UPLOAD_DIR):
     app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
@@ -1334,7 +1358,7 @@ async def root():
     return {"message": "VMS Backend API is running"}
 
 @app.get("/api/jobs", response_model=JobListResponse)
-async def get_jobs(background_tasks: BackgroundTasks):
+async def get_jobs(background_tasks: BackgroundTasks, current_user: UserDB = Depends(get_current_user)):
     """Get all active jobs from Ceipal API (uses cache if available for fast response)"""
     try:
         # Always return cached jobs immediately for fast response
@@ -1355,9 +1379,20 @@ async def get_jobs(background_tasks: BackgroundTasks):
         # Has more if we fetched less than total records available
         has_more = (jobs_fetched < total_records and total_records > 0) or total_pages == 0
         
+        # Check if user is admin for description sanitization
+        is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
+        
+        # Sanitize job descriptions for non-admin users (vendors)
+        sanitized_jobs = []
+        for job in cached_jobs:
+            job_dict = job.dict() if hasattr(job, 'dict') else job
+            if not is_admin and 'description' in job_dict:
+                job_dict['description'] = sanitize_job_description(job_dict['description'], is_admin)
+            sanitized_jobs.append(job_dict)
+        
         return JobListResponse(
-            jobs=cached_jobs, 
-            total=len(cached_jobs),
+            jobs=sanitized_jobs, 
+            total=len(sanitized_jobs),
             total_pages=total_pages,
             next_start_page=total_pages + 1,
             has_more=has_more
@@ -1366,9 +1401,17 @@ async def get_jobs(background_tasks: BackgroundTasks):
         # If fetch fails, try to return any cached data as fallback
         if ceipal_client._jobs_cache:
             total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
+            # Check if user is admin for fallback too
+            is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
+            sanitized_jobs = []
+            for job in ceipal_client._jobs_cache:
+                job_dict = job.dict() if hasattr(job, 'dict') else job
+                if not is_admin and 'description' in job_dict:
+                    job_dict['description'] = sanitize_job_description(job_dict['description'], is_admin)
+                sanitized_jobs.append(job_dict)
             return JobListResponse(
-                jobs=ceipal_client._jobs_cache, 
-                total=len(ceipal_client._jobs_cache),
+                jobs=sanitized_jobs, 
+                total=len(sanitized_jobs),
                 total_pages=total_pages,
                 next_start_page=total_pages + 1,
                 has_more=total_pages >= 25
