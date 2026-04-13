@@ -40,6 +40,14 @@ const els = {
   authPassword: document.getElementById('authPassword'),
   authSubmitBtn: document.getElementById('authSubmitBtn'),
   authAlert: document.getElementById('authAlert'),
+  forgotPasswordLink: document.getElementById('forgotPasswordLink'),
+  resetPasswordForm: document.getElementById('resetPasswordForm'),
+  resetEmail: document.getElementById('resetEmail'),
+  resetPassword: document.getElementById('resetPassword'),
+  resetPasswordConfirm: document.getElementById('resetPasswordConfirm'),
+  resetSubmitBtn: document.getElementById('resetSubmitBtn'),
+  resetAlert: document.getElementById('resetAlert'),
+  backToLoginLink: document.getElementById('backToLoginLink'),
   // Job Detail Modal
   jobDetailModal: document.getElementById('jobDetailModal'),
   jobDetailTitle: document.getElementById('jobDetailTitle'),
@@ -135,6 +143,84 @@ function logout() {
 
 // Register mode removed - only login allowed for whitelisted users
 // function toggleAuthMode() { }
+
+// Password reset functions
+function showForgotPasswordForm() {
+  // Hide login form, show reset form
+  els.authEmail.parentElement.parentElement.style.display = 'none';
+  els.resetPasswordForm.style.display = 'block';
+  els.resetAlert.hidden = true;
+  els.resetAlert.textContent = '';
+}
+
+function showLoginForm() {
+  // Hide reset form, show login form
+  els.resetPasswordForm.style.display = 'none';
+  els.authEmail.parentElement.parentElement.style.display = 'block';
+  els.authAlert.hidden = true;
+  els.authAlert.textContent = '';
+}
+
+function showResetAlert(type, msg) {
+  els.resetAlert.className = 'alert alert--' + type;
+  els.resetAlert.textContent = msg;
+  els.resetAlert.hidden = false;
+}
+
+function clearResetAlert() {
+  els.resetAlert.hidden = true;
+  els.resetAlert.textContent = '';
+}
+
+async function handlePasswordReset() {
+  clearResetAlert();
+  
+  const email = els.resetEmail.value.trim();
+  const password = els.resetPassword.value;
+  const confirmPassword = els.resetPasswordConfirm.value;
+  
+  if (!email) return showResetAlert('error', 'Email is required');
+  if (!password) return showResetAlert('error', 'Password is required');
+  if (password !== confirmPassword) return showResetAlert('error', 'Passwords do not match');
+  if (password.length < 6) return showResetAlert('error', 'Password must be at least 6 characters');
+  
+  const body = { email, password };
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(text.includes('Internal Server Error') ? 'Server error. Please try again.' : text.slice(0, 100));
+    }
+    
+    if (!res.ok) {
+      throw new Error(data.detail || data.message || `Error: ${res.status}`);
+    }
+    
+    // Clear form
+    els.resetEmail.value = '';
+    els.resetPassword.value = '';
+    els.resetPasswordConfirm.value = '';
+    
+    // Show success and switch back to login
+    showResetAlert('ok', 'Password reset successfully! Please login with your new password.');
+    
+    setTimeout(() => {
+      showLoginForm();
+    }, 2000);
+    
+  } catch (e) {
+    showResetAlert('error', e.message);
+  }
+}
 
 async function handleAuthSubmit() {
   clearAuthAlert();
@@ -1161,6 +1247,25 @@ if (els.logoutBtn) {
 
 if (els.authSubmitBtn) {
   els.authSubmitBtn.addEventListener('click', handleAuthSubmit);
+}
+
+// Password reset event listeners
+if (els.forgotPasswordLink) {
+  els.forgotPasswordLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    showForgotPasswordForm();
+  });
+}
+
+if (els.backToLoginLink) {
+  els.backToLoginLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    showLoginForm();
+  });
+}
+
+if (els.resetSubmitBtn) {
+  els.resetSubmitBtn.addEventListener('click', handlePasswordReset);
 }
 
 // Register toggle removed - only login allowed

@@ -447,6 +447,30 @@ async def login(user_data: UserLogin):
         }
     }
 
+@app.post("/api/auth/reset-password")
+async def reset_password(user_data: UserLogin):
+    """Reset password for existing user (whitelisted emails only)"""
+    global _users_cache
+    
+    email_lower = user_data.email.lower()
+    
+    # Check if email is whitelisted
+    if email_lower not in WHITELISTED_USERS:
+        raise HTTPException(status_code=403, detail="Email not authorized")
+    
+    # Check if user exists
+    if email_lower not in _users_cache:
+        raise HTTPException(status_code=404, detail="User not found. Please login first to create your account.")
+    
+    # Update password
+    hashed_password = get_password_hash(user_data.password)
+    _users_cache[email_lower]["hashed_password"] = hashed_password
+    
+    # Save to JSON file
+    save_users_to_json(_users_cache)
+    
+    return {"message": "Password reset successfully"}
+
 @app.get("/api/auth/me", response_model=UserResponse)
 async def get_current_user_info(current_user: UserDB = Depends(get_current_user)):
     """Get current logged in user info"""

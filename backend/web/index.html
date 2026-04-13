@@ -72,6 +72,34 @@
             <div class="row" style="gap: 12px; margin-top: 20px;">
               <button class="btn" id="authSubmitBtn" style="flex: 1;">Login</button>
             </div>
+            <div style="margin-top: 16px; text-align: center;">
+              <a href="#" id="forgotPasswordLink" style="color: #7c3aed; font-size: 14px; text-decoration: none;">Forgot Password?</a>
+            </div>
+          </div>
+          
+          <!-- Password Reset Form (hidden by default) -->
+          <div class="form" id="resetPasswordForm" style="margin-top: 24px; display: none;">
+            <div class="panel__title" style="margin-bottom: 16px;">Reset Password</div>
+            <div class="panel__desc" style="margin-bottom: 16px; font-size: 14px;">Enter your email and new password</div>
+            <div class="field">
+              <label>Email</label>
+              <input id="resetEmail" class="input" type="email" placeholder="name@example.com" />
+            </div>
+            <div class="field">
+              <label>New Password</label>
+              <input id="resetPassword" class="input" type="password" placeholder="Enter new password" />
+            </div>
+            <div class="field">
+              <label>Confirm Password</label>
+              <input id="resetPasswordConfirm" class="input" type="password" placeholder="Confirm new password" />
+            </div>
+            <div class="alert" id="resetAlert" hidden></div>
+            <div class="row" style="gap: 12px; margin-top: 20px;">
+              <button class="btn" id="resetSubmitBtn" style="flex: 1;">Reset Password</button>
+            </div>
+            <div style="margin-top: 16px; text-align: center;">
+              <a href="#" id="backToLoginLink" style="color: #7c3aed; font-size: 14px; text-decoration: none;">Back to Login</a>
+            </div>
           </div>
         </div>
       </section>
