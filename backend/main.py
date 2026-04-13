@@ -19,18 +19,64 @@ import bcrypt
 from jose import JWTError, jwt
 from uuid import uuid4
 import asyncio
+from pymongo import MongoClient
+from pymongo.server_api import ServerApi
 
 # Load environment variables
 load_dotenv()
+
+# MongoDB setup for persistent storage (works on Render free tier)
+MONGODB_URI = os.getenv("MONGODB_URI", "")
+mongo_client = None
+db = None
+users_collection = None
+whitelist_collection = None
+
+def init_mongodb():
+    """Initialize MongoDB connection"""
+    global mongo_client, db, users_collection, whitelist_collection
+    
+    if not MONGODB_URI:
+        print("[MongoDB] No MONGODB_URI set, using fallback JSON storage")
+        return False
+    
+    try:
+        mongo_client = MongoClient(MONGODB_URI, server_api=ServerApi('1'))
+        db = mongo_client.vms
+        users_collection = db.users
+        whitelist_collection = db.whitelist
+        
+        # Test connection
+        mongo_client.admin.command('ping')
+        print("[MongoDB] Connected successfully")
+        return True
+    except Exception as e:
+        print(f"[MongoDB] Connection failed: {e}")
+        return False
+
+# Initialize MongoDB on startup
+mongodb_enabled = init_mongodb()
 
 # Load whitelisted users from Users file
 WHITELISTED_USERS = set()
 USERS_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", "Users")
 
 def load_whitelisted_users():
-    """Load whitelisted users from Users file"""
+    """Load whitelisted users from MongoDB or fallback to Users file"""
     global WHITELISTED_USERS
     WHITELISTED_USERS = set()
+    
+    # Try MongoDB first
+    if mongodb_enabled and whitelist_collection:
+        try:
+            for doc in whitelist_collection.find():
+                WHITELISTED_USERS.add(doc["email"].lower())
+            print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from MongoDB")
+            return
+        except Exception as e:
+            print(f"[Auth] Error loading from MongoDB: {e}, falling back to file")
+    
+    # Fallback to file
     try:
         if os.path.exists(USERS_FILE_PATH):
             with open(USERS_FILE_PATH, "r") as f:
@@ -38,17 +84,30 @@ def load_whitelisted_users():
                     email = line.strip()
                     if email and not email.startswith("#"):
                         WHITELISTED_USERS.add(email.lower())
-        print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users")
+        print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from file")
     except Exception as e:
         print(f"[Auth] Error loading Users file: {e}")
 
 def save_whitelisted_users():
-    """Save whitelisted users to Users file"""
+    """Save whitelisted users to MongoDB or fallback to Users file"""
+    # Try MongoDB first
+    if mongodb_enabled and whitelist_collection:
+        try:
+            # Clear and re-insert all emails
+            whitelist_collection.delete_many({})
+            for email in WHITELISTED_USERS:
+                whitelist_collection.insert_one({"email": email.lower()})
+            print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users to MongoDB")
+            return True
+        except Exception as e:
+            print(f"[Auth] Error saving to MongoDB: {e}, falling back to file")
+    
+    # Fallback to file
     try:
         with open(USERS_FILE_PATH, "w") as f:
             for email in sorted(WHITELISTED_USERS):
                 f.write(f"{email}\n")
-        print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users")
+        print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users to file")
         return True
     except Exception as e:
         print(f"[Auth] Error saving Users file: {e}")
@@ -61,7 +120,27 @@ load_whitelisted_users()
 USERS_JSON_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "users.json")
 
 def load_users_from_json():
-    """Load users from JSON file"""
+    """Load users from MongoDB or fallback to JSON file"""
+    # Try MongoDB first
+    if mongodb_enabled and users_collection:
+        try:
+            users = {}
+            for doc in users_collection.find():
+                email = doc["email"].lower()
+                users[email] = {
+                    "id": doc["id"],
+                    "email": doc["email"],
+                    "full_name": doc["full_name"],
+                    "hashed_password": doc["hashed_password"],
+                    "is_active": doc["is_active"],
+                    "created_at": doc.get("created_at", datetime.now().isoformat())
+                }
+            print(f"[Auth] Loaded {len(users)} users from MongoDB")
+            return users
+        except Exception as e:
+            print(f"[Auth] Error loading users from MongoDB: {e}, falling back to JSON")
+    
+    # Fallback to JSON file
     if os.path.exists(USERS_JSON_FILE):
         try:
             with open(USERS_JSON_FILE, "r") as f:
@@ -71,7 +150,30 @@ def load_users_from_json():
     return {}
 
 def save_users_to_json(users):
-    """Save users to JSON file"""
+    """Save users to MongoDB or fallback to JSON file"""
+    # Try MongoDB first
+    if mongodb_enabled and users_collection:
+        try:
+            # Update each user individually (upsert)
+            for email, user_data in users.items():
+                users_collection.update_one(
+                    {"email": email.lower()},
+                    {"$set": {
+                        "id": user_data["id"],
+                        "email": user_data["email"],
+                        "full_name": user_data["full_name"],
+                        "hashed_password": user_data["hashed_password"],
+                        "is_active": user_data["is_active"],
+                        "created_at": user_data.get("created_at", datetime.now().isoformat())
+                    }},
+                    upsert=True
+                )
+            print(f"[Auth] Saved {len(users)} users to MongoDB")
+            return True
+        except Exception as e:
+            print(f"[Auth] Error saving users to MongoDB: {e}, falling back to JSON")
+    
+    # Fallback to JSON file
     try:
         os.makedirs(os.path.dirname(USERS_JSON_FILE), exist_ok=True)
         with open(USERS_JSON_FILE, "w") as f:
@@ -81,9 +183,8 @@ def save_users_to_json(users):
         print(f"[Auth] Error saving users JSON: {e}")
         return False
 
-# In-memory user cache (loaded from JSON on startup)
+# In-memory user cache (loaded from MongoDB/JSON on startup)
 _users_cache = load_users_from_json()
-print(f"[Auth] Loaded {len(_users_cache)} users from JSON storage")
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////opt/render/project/src/data/vms.db")
