@@ -42,6 +42,7 @@ const els = {
   userInfo: document.getElementById('userInfo'),
   userName: document.getElementById('userName'),
   logoutBtn: document.getElementById('logoutBtn'),
+  systemNavBtn: document.getElementById('systemNavBtn'),
   authTitle: document.getElementById('authTitle'),
   authEmail: document.getElementById('authEmail'),
   authPassword: document.getElementById('authPassword'),
@@ -222,6 +223,11 @@ function updateAuthUI() {
     const submissionsNav = document.querySelector('[data-view="submissions"]');
     if (submissionsNav) {
       submissionsNav.hidden = false;
+    }
+    
+    // Show System nav button only for admin
+    if (els.systemNavBtn) {
+      els.systemNavBtn.hidden = !isAdmin();
     }
   } else {
     // Not logged in - show auth form
