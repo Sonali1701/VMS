@@ -17,6 +17,13 @@ const els = {
   openDocsBtn: document.getElementById('openDocsBtn'),
   systemJson: document.getElementById('systemJson'),
   systemStatus: document.getElementById('systemStatus'),
+  // Admin user management
+  adminUserPanel: document.getElementById('adminUserPanel'),
+  newUserEmail: document.getElementById('newUserEmail'),
+  addUserBtn: document.getElementById('addUserBtn'),
+  addUserAlert: document.getElementById('addUserAlert'),
+  userCount: document.getElementById('userCount'),
+  usersList: document.getElementById('usersList'),
   apiBase: document.getElementById('apiBase'),
   pageTitle: document.getElementById('pageTitle'),
   pageSubtitle: document.getElementById('pageSubtitle'),
@@ -94,6 +101,102 @@ const ADMIN_EMAIL = 'Admin@radixsol.com';
 
 function isAdmin() {
   return currentUser && currentUser.email && currentUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+}
+
+// Admin user management functions
+function showAddUserAlert(type, msg) {
+  els.addUserAlert.className = 'alert alert--' + type;
+  els.addUserAlert.textContent = msg;
+  els.addUserAlert.hidden = false;
+}
+
+function clearAddUserAlert() {
+  els.addUserAlert.hidden = true;
+  els.addUserAlert.textContent = '';
+}
+
+async function loadWhitelistedUsers() {
+  if (!isAdmin()) return;
+  
+  try {
+    const data = await apiGetAuth('/api/admin/users');
+    const users = data.users || [];
+    
+    els.userCount.textContent = users.length;
+    
+    if (users.length === 0) {
+      els.usersList.innerHTML = '<div class="empty">No whitelisted users yet.</div>';
+      return;
+    }
+    
+    const list = users.map(email => `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: var(--panel-2); border-radius: 6px; margin-bottom: 8px;">
+        <span>${email}</span>
+        ${email.toLowerCase() !== ADMIN_EMAIL.toLowerCase() ? `
+          <button class="btn btn--secondary btn--small" onclick="removeUser('${email}')" style="font-size: 12px; padding: 4px 12px;">Remove</button>
+        ` : '<span style="color: var(--muted); font-size: 12px;">(Admin)</span>'}
+      </div>
+    `).join('');
+    
+    els.usersList.innerHTML = list;
+  } catch (e) {
+    els.usersList.innerHTML = '<div class="empty">Error loading users: ' + e.message + '</div>';
+  }
+}
+
+async function addUser() {
+  clearAddUserAlert();
+  
+  const email = els.newUserEmail.value.trim();
+  if (!email) return showAddUserAlert('error', 'Email is required');
+  if (!email.includes('@')) return showAddUserAlert('error', 'Invalid email format');
+  
+  try {
+    const formData = new FormData();
+    formData.append('email', email);
+    
+    const res = await fetch(`${API_BASE}/api/admin/users`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${authToken}` },
+      body: formData
+    });
+    
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.detail || data.message || 'Failed to add user');
+    }
+    
+    // Clear input and reload list
+    els.newUserEmail.value = '';
+    showAddUserAlert('ok', `User ${email} added successfully`);
+    await loadWhitelistedUsers();
+    
+  } catch (e) {
+    showAddUserAlert('error', e.message);
+  }
+}
+
+async function removeUser(email) {
+  if (!confirm(`Are you sure you want to remove ${email} from the whitelist?`)) return;
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/users/${encodeURIComponent(email)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.detail || data.message || 'Failed to remove user');
+    }
+    
+    await loadWhitelistedUsers();
+    
+  } catch (e) {
+    alert('Error removing user: ' + e.message);
+  }
 }
 
 function showAuthAlert(kind, msg) {
@@ -522,6 +625,13 @@ function setView(view) {
   if (view === 'settings') {
     els.pageTitle.textContent = 'System';
     els.pageSubtitle.textContent = 'Ceipal connectivity and cached raw responses.';
+    // Show admin user panel only for admin
+    if (els.adminUserPanel) {
+      els.adminUserPanel.hidden = !isAdmin();
+      if (isAdmin()) {
+        loadWhitelistedUsers();
+      }
+    }
     loadSystem();
   }
 }
@@ -1266,6 +1376,11 @@ if (els.backToLoginLink) {
 
 if (els.resetSubmitBtn) {
   els.resetSubmitBtn.addEventListener('click', handlePasswordReset);
+}
+
+// Admin user management event listener
+if (els.addUserBtn) {
+  els.addUserBtn.addEventListener('click', addUser);
 }
 
 // Register toggle removed - only login allowed

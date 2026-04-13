@@ -157,6 +157,28 @@
       </section>
 
       <section class="content" id="viewSettings" hidden>
+        <!-- Admin User Management (admin only) -->
+        <div class="panel" id="adminUserPanel" hidden>
+          <div class="panel__title">User Management (Admin Only)</div>
+          <div class="panel__desc">Add or remove whitelisted users who can access the system.</div>
+          
+          <div style="margin: 20px 0; padding: 16px; background: var(--panel-2); border-radius: 8px;">
+            <div style="font-weight: 600; margin-bottom: 12px;">Add New User</div>
+            <div class="row" style="gap: 12px; flex-wrap: wrap;">
+              <input id="newUserEmail" class="input" type="email" placeholder="user@example.com" style="flex: 1; min-width: 200px;" />
+              <button class="btn" id="addUserBtn">Add User</button>
+            </div>
+            <div id="addUserAlert" class="alert" hidden style="margin-top: 12px;"></div>
+          </div>
+          
+          <div style="margin-top: 20px;">
+            <div style="font-weight: 600; margin-bottom: 12px;">Whitelisted Users (<span id="userCount">0</span>)</div>
+            <div id="usersList" style="max-height: 300px; overflow-y: auto;">
+              <!-- Users will be loaded here -->
+            </div>
+          </div>
+        </div>
+        
         <div class="panel">
           <div class="panel__title">System</div>
           <div class="panel__desc">Ceipal connectivity and cached raw responses.</div>

@@ -25,17 +25,37 @@ load_dotenv()
 
 # Load whitelisted users from Users file
 WHITELISTED_USERS = set()
-try:
-    users_file_path = os.path.join(os.path.dirname(__file__), "..", "Users")
-    if os.path.exists(users_file_path):
-        with open(users_file_path, "r") as f:
-            for line in f:
-                email = line.strip()
-                if email and not email.startswith("#"):
-                    WHITELISTED_USERS.add(email.lower())
-    print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users")
-except Exception as e:
-    print(f"[Auth] Error loading Users file: {e}")
+USERS_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", "Users")
+
+def load_whitelisted_users():
+    """Load whitelisted users from Users file"""
+    global WHITELISTED_USERS
+    WHITELISTED_USERS = set()
+    try:
+        if os.path.exists(USERS_FILE_PATH):
+            with open(USERS_FILE_PATH, "r") as f:
+                for line in f:
+                    email = line.strip()
+                    if email and not email.startswith("#"):
+                        WHITELISTED_USERS.add(email.lower())
+        print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users")
+    except Exception as e:
+        print(f"[Auth] Error loading Users file: {e}")
+
+def save_whitelisted_users():
+    """Save whitelisted users to Users file"""
+    try:
+        with open(USERS_FILE_PATH, "w") as f:
+            for email in sorted(WHITELISTED_USERS):
+                f.write(f"{email}\n")
+        print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users")
+        return True
+    except Exception as e:
+        print(f"[Auth] Error saving Users file: {e}")
+        return False
+
+# Initial load
+load_whitelisted_users()
 
 # JSON-based user storage for persistence without disk
 USERS_JSON_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "users.json")
@@ -470,6 +490,80 @@ async def reset_password(user_data: UserLogin):
     save_users_to_json(_users_cache)
     
     return {"message": "Password reset successfully"}
+
+@app.get("/api/admin/users")
+async def get_whitelisted_users(current_user: UserDB = Depends(get_current_user)):
+    """Get list of whitelisted users (admin only)"""
+    is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Only admin can manage users")
+    
+    return {
+        "users": sorted(list(WHITELISTED_USERS)),
+        "count": len(WHITELISTED_USERS)
+    }
+
+@app.post("/api/admin/users")
+async def add_whitelisted_user(
+    email: str = Form(...),
+    current_user: UserDB = Depends(get_current_user)
+):
+    """Add a new user to whitelist (admin only)"""
+    global WHITELISTED_USERS
+    
+    is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Only admin can add users")
+    
+    email_lower = email.lower().strip()
+    
+    # Validate email format
+    if not email_lower or "@" not in email_lower:
+        raise HTTPException(status_code=400, detail="Invalid email format")
+    
+    # Check if already exists
+    if email_lower in WHITELISTED_USERS:
+        raise HTTPException(status_code=400, detail="User already whitelisted")
+    
+    # Add to whitelist
+    WHITELISTED_USERS.add(email_lower)
+    
+    # Save to file
+    if save_whitelisted_users():
+        return {"message": f"User {email} added to whitelist", "email": email_lower}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save users file")
+
+@app.delete("/api/admin/users/{email}")
+async def remove_whitelisted_user(
+    email: str,
+    current_user: UserDB = Depends(get_current_user)
+):
+    """Remove a user from whitelist (admin only)"""
+    global WHITELISTED_USERS
+    
+    is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Only admin can remove users")
+    
+    email_lower = email.lower().strip()
+    
+    # Cannot remove admin
+    if email_lower == ADMIN_EMAIL.lower():
+        raise HTTPException(status_code=400, detail="Cannot remove admin user")
+    
+    # Check if exists
+    if email_lower not in WHITELISTED_USERS:
+        raise HTTPException(status_code=404, detail="User not found in whitelist")
+    
+    # Remove from whitelist
+    WHITELISTED_USERS.remove(email_lower)
+    
+    # Save to file
+    if save_whitelisted_users():
+        return {"message": f"User {email} removed from whitelist", "email": email_lower}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save users file")
 
 @app.get("/api/auth/me", response_model=UserResponse)
 async def get_current_user_info(current_user: UserDB = Depends(get_current_user)):
