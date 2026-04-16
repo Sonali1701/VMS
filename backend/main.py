@@ -89,7 +89,9 @@ def load_whitelisted_users():
         print(f"[Auth] Error loading Users file: {e}")
 
 def save_whitelisted_users():
-    """Save whitelisted users to MongoDB or fallback to Users file"""
+    """Save whitelisted users to MongoDB AND file for redundancy"""
+    success = False
+    
     # Try MongoDB first
     if mongodb_enabled and whitelist_collection:
         try:
@@ -98,20 +100,21 @@ def save_whitelisted_users():
             for email in WHITELISTED_USERS:
                 whitelist_collection.insert_one({"email": email.lower()})
             print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users to MongoDB")
-            return True
+            success = True
         except Exception as e:
-            print(f"[Auth] Error saving to MongoDB: {e}, falling back to file")
+            print(f"[Auth] Error saving to MongoDB: {e}")
     
-    # Fallback to file
+    # ALWAYS save to file as backup (even if MongoDB succeeded)
     try:
         with open(USERS_FILE_PATH, "w") as f:
             for email in sorted(WHITELISTED_USERS):
                 f.write(f"{email}\n")
         print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users to file")
-        return True
+        success = True
     except Exception as e:
         print(f"[Auth] Error saving Users file: {e}")
-        return False
+    
+    return success
 
 # Initial load
 load_whitelisted_users()
