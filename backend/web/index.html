@@ -23,6 +23,7 @@
         <button class="nav__item" data-view="offers">Offers</button>
         <button class="nav__item" data-view="declines">Declines</button>
         <button class="nav__item" data-view="starts">Starts</button>
+        <button class="nav__item" data-view="dashboard" id="dashboardNavBtn" hidden>Dashboard</button>
         <button class="nav__item" data-view="settings" id="systemNavBtn" hidden>System</button>
       </nav>
 
@@ -155,6 +156,76 @@
           <div class="panel__title">Starts</div>
           <div class="panel__desc">Track candidates who have started working.</div>
           <div id="startsTable"></div>
+        </div>
+      </section>
+
+      <!-- Admin Dashboard -->
+      <section class="content" id="viewDashboard" hidden>
+        <div class="panel" style="margin-bottom: 20px;">
+          <div class="panel__title">Admin Dashboard</div>
+          <div class="panel__desc">Overview of jobs and submissions across the platform.</div>
+          <div id="dashboardLastUpdated" style="margin-top: 8px; font-size: 12px; color: #6b7280;"></div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="row" style="gap: 16px; margin-bottom: 24px; flex-wrap: wrap;">
+          <div class="panel" style="flex: 1; min-width: 200px; text-align: center; padding: 24px;">
+            <div style="font-size: 32px; font-weight: 700; color: #7c3aed;" id="dashTotalJobs">0</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 8px;">Total Jobs</div>
+          </div>
+          <div class="panel" style="flex: 1; min-width: 200px; text-align: center; padding: 24px;">
+            <div style="font-size: 32px; font-weight: 700; color: #059669;" id="dashTotalSubmissions">0</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 8px;">Total Submissions</div>
+          </div>
+          <div class="panel" style="flex: 1; min-width: 200px; text-align: center; padding: 24px;">
+            <div style="font-size: 32px; font-weight: 700; color: #2563eb;" id="dashActiveVendors">0</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 8px;">Active Vendors</div>
+          </div>
+        </div>
+
+        <!-- Status Breakdown -->
+        <div class="panel" style="margin-bottom: 20px;">
+          <div class="panel__title">Submission Status Breakdown</div>
+          <div class="row" style="gap: 12px; margin-top: 16px; flex-wrap: wrap;" id="dashStatusBreakdown">
+            <!-- Status badges will be inserted here -->
+          </div>
+        </div>
+
+        <!-- Job-wise Submissions -->
+        <div class="panel" style="margin-bottom: 20px;">
+          <div class="panel__title">Top Jobs by Submissions</div>
+          <div style="margin-top: 16px;">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Job Title</th>
+                  <th style="text-align: center;">Submissions</th>
+                </tr>
+              </thead>
+              <tbody id="dashJobSubmissions">
+                <!-- Job rows will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Vendor Statistics -->
+        <div class="panel">
+          <div class="panel__title">Vendor Performance</div>
+          <div style="margin-top: 16px;">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Vendor</th>
+                  <th style="text-align: center;">Total Submissions</th>
+                  <th style="text-align: center;">Unique Jobs</th>
+                </tr>
+              </thead>
+              <tbody id="dashVendorStats">
+                <!-- Vendor rows will be inserted here -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
