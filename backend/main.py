@@ -19,8 +19,10 @@ import bcrypt
 from jose import JWTError, jwt
 from uuid import uuid4
 import asyncio
+import tempfile
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
+from bson.objectid import ObjectId
 
 # Load environment variables
 load_dotenv()
@@ -2027,7 +2029,6 @@ async def download_resume(candidate_id: str):
         
         if storage_type == "gridfs" and mongodb_enabled and fs:
             # Retrieve from GridFS
-            from bson.objectid import ObjectId
             file_id = candidate.get("resume_storage_id")
             if not file_id:
                 raise HTTPException(status_code=404, detail="Resume file reference not found")
@@ -2037,7 +2038,6 @@ async def download_resume(candidate_id: str):
                 raise HTTPException(status_code=404, detail="Resume file not found in storage")
             
             # Create a temporary file for the response
-            import tempfile
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(candidate.get("resume_filename", "resume.pdf"))[1]) as tmp:
                 tmp.write(grid_file.read())
                 tmp_path = tmp.name
