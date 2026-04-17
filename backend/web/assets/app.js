@@ -615,6 +615,16 @@ function renderJobs() {
   els.jobsGrid.innerHTML = '';
   const filtered = allJobs.filter(jobMatches);
 
+  // Update jobs count display - show filtered count when searching
+  if (els.jobsCount) {
+    const hasFilter = els.searchInput.value || els.statusFilter.value;
+    if (hasFilter && allJobs.length > 0) {
+      els.jobsCount.textContent = `${filtered.length} of ${allJobs.length}`;
+    } else {
+      els.jobsCount.textContent = allJobs.length;
+    }
+  }
+
   // Show/hide empty state and update message
   if (filtered.length === 0) {
     els.jobsEmpty.hidden = false;
@@ -985,10 +995,6 @@ async function loadJobs() {
     allJobs = data.jobs || [];
     hasMoreJobs = data.has_more || false;
     console.log(`[Jobs] Loaded ${allJobs.length} jobs. Has more: ${hasMoreJobs}`);
-    // Update jobs count display
-    if (els.jobsCount) {
-      els.jobsCount.textContent = allJobs.length;
-    }
     renderJobs();
     
     // If no jobs yet or still fetching more, start polling
@@ -1009,10 +1015,6 @@ async function loadJobs() {
             allJobs = newJobs;
             hasMoreJobs = pollData.has_more || false;
             console.log(`[Jobs] Updated: now ${allJobs.length} jobs`);
-            // Update jobs count display
-            if (els.jobsCount) {
-              els.jobsCount.textContent = allJobs.length;
-            }
             renderJobs();
           }
           
