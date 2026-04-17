@@ -477,10 +477,12 @@ CEIPAL_CACHE_DIR = os.getenv("CEIPAL_CACHE_DIR", "/opt/render/project/src/data/c
 DEBUG = os.getenv("DEBUG", "False").lower() in {"1", "true", "yes", "y"}
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/opt/render/project/src/data/uploads")
+DATA_DIR = os.getenv("DATA_DIR", "/opt/render/project/src/data")
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 10485760))  # 10MB
 
-# Ensure upload directory exists
+# Ensure directories exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # Pydantic Models
 class Job(BaseModel):
