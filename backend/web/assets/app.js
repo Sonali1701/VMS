@@ -27,25 +27,14 @@ const els = {
   apiBase: document.getElementById('apiBase'),
   pageTitle: document.getElementById('pageTitle'),
   pageSubtitle: document.getElementById('pageSubtitle'),
-  jobsCount: document.getElementById('jobsCount'),
   viewJobs: document.getElementById('viewJobs'),
   viewSubmissions: document.getElementById('viewSubmissions'),
   viewOffers: document.getElementById('viewOffers'),
   viewDeclines: document.getElementById('viewDeclines'),
   viewStarts: document.getElementById('viewStarts'),
   viewSettings: document.getElementById('viewSettings'),
-  viewDashboard: document.getElementById('viewDashboard'),
   viewAuth: document.getElementById('viewAuth'),
   submissionsTable: document.getElementById('submissionsTable'),
-  // Dashboard elements
-  dashboardNavBtn: document.getElementById('dashboardNavBtn'),
-  dashTotalJobs: document.getElementById('dashTotalJobs'),
-  dashTotalSubmissions: document.getElementById('dashTotalSubmissions'),
-  dashActiveVendors: document.getElementById('dashActiveVendors'),
-  dashStatusBreakdown: document.getElementById('dashStatusBreakdown'),
-  dashJobSubmissions: document.getElementById('dashJobSubmissions'),
-  dashVendorStats: document.getElementById('dashVendorStats'),
-  dashboardLastUpdated: document.getElementById('dashboardLastUpdated'),
   offersTable: document.getElementById('offersTable'),
   declinesTable: document.getElementById('declinesTable'),
   startsTable: document.getElementById('startsTable'),
@@ -211,91 +200,6 @@ async function removeUser(email) {
   }
 }
 
-// Dashboard functions
-async function loadDashboard() {
-  if (!isAdmin()) return;
-  
-  console.log('[Dashboard] Loading dashboard...');
-  console.log('[Dashboard] Elements:', {
-    dashTotalJobs: els.dashTotalJobs,
-    dashTotalSubmissions: els.dashTotalSubmissions,
-    dashActiveVendors: els.dashActiveVendors
-  });
-  
-  try {
-    const data = await apiGetAuth('/api/admin/dashboard');
-    console.log('[Dashboard] Data received:', data);
-    
-    // Update summary cards
-    if (els.dashTotalJobs) els.dashTotalJobs.textContent = data.total_jobs || 0;
-    if (els.dashTotalSubmissions) els.dashTotalSubmissions.textContent = data.total_submissions || 0;
-    if (els.dashActiveVendors) els.dashActiveVendors.textContent = data.vendor_stats ? data.vendor_stats.length : 0;
-    
-    // Update last updated time
-    if (data.last_updated && els.dashboardLastUpdated) {
-      const date = new Date(data.last_updated);
-      els.dashboardLastUpdated.textContent = `Last updated: ${date.toLocaleString()}`;
-    }
-    
-    // Status breakdown
-    const statusColors = {
-      submitted: { bg: '#e0e7ff', color: '#3730a3' },
-      offer: { bg: '#d1fae5', color: '#065f46' },
-      decline: { bg: '#fee2e2', color: '#991b1b' },
-      start: { bg: '#dbeafe', color: '#1e40af' }
-    };
-    
-    if (data.status_breakdown && els.dashStatusBreakdown) {
-      const statusHtml = Object.entries(data.status_breakdown).map(([status, count]) => {
-        const colors = statusColors[status] || { bg: '#f3f4f6', color: '#374151' };
-        return `
-          <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: ${colors.bg}; color: ${colors.color}; border-radius: 20px; font-weight: 600; font-size: 14px;">
-            <span style="text-transform: capitalize;">${status}</span>
-            <span style="background: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">${count}</span>
-          </div>
-        `;
-      }).join('');
-      els.dashStatusBreakdown.innerHTML = statusHtml || '<div style="color: #6b7280;">No submissions yet</div>';
-    }
-    
-    // Job submissions table
-    if (data.job_submissions && els.dashJobSubmissions) {
-      const jobsHtml = data.job_submissions.map(job => `
-        <tr>
-          <td style="padding: 12px; border-bottom: 1px solid var(--border);">${job.job_title}</td>
-          <td style="padding: 12px; border-bottom: 1px solid var(--border); text-align: center; font-weight: 600;">${job.count}</td>
-        </tr>
-      `).join('');
-      els.dashJobSubmissions.innerHTML = jobsHtml || '<tr><td colspan="2" style="padding: 12px; text-align: center; color: #6b7280;">No job submissions yet</td></tr>';
-    }
-    
-    // Vendor stats table
-    if (data.vendor_stats && els.dashVendorStats) {
-      const vendorsHtml = data.vendor_stats.map(vendor => `
-        <tr>
-          <td style="padding: 12px; border-bottom: 1px solid var(--border);">
-            <div style="font-weight: 500;">${vendor.name}</div>
-            <div style="font-size: 12px; color: #6b7280;">${vendor.email}</div>
-          </td>
-          <td style="padding: 12px; border-bottom: 1px solid var(--border); text-align: center; font-weight: 600; color: #059669;">${vendor.total_submissions}</td>
-          <td style="padding: 12px; border-bottom: 1px solid var(--border); text-align: center;">${vendor.unique_jobs}</td>
-        </tr>
-      `).join('');
-      els.dashVendorStats.innerHTML = vendorsHtml || '<tr><td colspan="3" style="padding: 12px; text-align: center; color: #6b7280;">No vendor submissions yet</td></tr>';
-    }
-    
-  } catch (e) {
-    console.error('[Dashboard] Failed to load dashboard:', e);
-    if (els.dashTotalJobs) els.dashTotalJobs.textContent = 'Error';
-    if (els.dashTotalSubmissions) els.dashTotalSubmissions.textContent = '-';
-    if (els.dashActiveVendors) els.dashActiveVendors.textContent = '-';
-    // Show error message in status breakdown
-    if (els.dashStatusBreakdown) {
-      els.dashStatusBreakdown.innerHTML = `<div style="color: #dc2626;">Error loading dashboard: ${e.message}</div>`;
-    }
-  }
-}
-
 function showAuthAlert(kind, msg) {
   els.authAlert.hidden = false;
   els.authAlert.className = `alert ${kind === 'ok' ? 'alert--ok' : 'alert--error'}`;
@@ -321,12 +225,9 @@ function updateAuthUI() {
       submissionsNav.hidden = false;
     }
     
-    // Show System and Dashboard nav buttons only for admin
+    // Show System nav button only for admin
     if (els.systemNavBtn) {
       els.systemNavBtn.hidden = !isAdmin();
-    }
-    if (els.dashboardNavBtn) {
-      els.dashboardNavBtn.hidden = !isAdmin();
     }
   } else {
     // Not logged in - show auth form
@@ -629,16 +530,6 @@ function renderJobs() {
   els.jobsGrid.innerHTML = '';
   const filtered = allJobs.filter(jobMatches);
 
-  // Update jobs count display - show filtered count when searching
-  if (els.jobsCount) {
-    const hasFilter = els.searchInput.value || els.statusFilter.value;
-    if (hasFilter && allJobs.length > 0) {
-      els.jobsCount.textContent = `${filtered.length} of ${allJobs.length}`;
-    } else {
-      els.jobsCount.textContent = allJobs.length;
-    }
-  }
-
   // Show/hide empty state and update message
   if (filtered.length === 0) {
     els.jobsEmpty.hidden = false;
@@ -662,7 +553,6 @@ function renderJobs() {
     meta.innerHTML = `
       <span class="tag">${job.department || 'Department: N/A'}</span>
       <span class="tag">${job.location || 'Location: N/A'}</span>
-      ${job.end_client ? `<span class="tag">End Client: ${job.end_client}</span>` : ''}
       <span class="tag">${job.employment_type || 'Type: N/A'}</span>
       <span class="tag">Status: ${job.status || 'N/A'}</span>
     `;
@@ -749,12 +639,6 @@ function setView(view) {
       }
     }
     loadSystem();
-  }
-  
-  if (view === 'dashboard') {
-    els.pageTitle.textContent = 'Admin Dashboard';
-    els.pageSubtitle.textContent = 'Overview of jobs and submissions.';
-    loadDashboard();
   }
 }
 

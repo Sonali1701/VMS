@@ -65,7 +65,6 @@ def load_whitelisted_users():
     """Load whitelisted users from MongoDB or fallback to Users file"""
     global WHITELISTED_USERS
     WHITELISTED_USERS = set()
-    loaded_from_mongodb = False
     
     # Try MongoDB first
     if mongodb_enabled and whitelist_collection:
@@ -73,35 +72,24 @@ def load_whitelisted_users():
             for doc in whitelist_collection.find():
                 WHITELISTED_USERS.add(doc["email"].lower())
             print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from MongoDB")
-            loaded_from_mongodb = True
-            # Sync to file to keep them in sync
-            try:
-                with open(USERS_FILE_PATH, "w") as f:
-                    for email in sorted(WHITELISTED_USERS):
-                        f.write(f"{email}\n")
-                print(f"[Auth] Synced {len(WHITELISTED_USERS)} whitelisted users to file")
-            except Exception as e:
-                print(f"[Auth] Error syncing to file: {e}")
+            return
         except Exception as e:
             print(f"[Auth] Error loading from MongoDB: {e}, falling back to file")
     
-    # Fallback to file if MongoDB failed or not enabled
-    if not loaded_from_mongodb:
-        try:
-            if os.path.exists(USERS_FILE_PATH):
-                with open(USERS_FILE_PATH, "r") as f:
-                    for line in f:
-                        email = line.strip()
-                        if email and not email.startswith("#"):
-                            WHITELISTED_USERS.add(email.lower())
-            print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from file")
-        except Exception as e:
-            print(f"[Auth] Error loading Users file: {e}")
+    # Fallback to file
+    try:
+        if os.path.exists(USERS_FILE_PATH):
+            with open(USERS_FILE_PATH, "r") as f:
+                for line in f:
+                    email = line.strip()
+                    if email and not email.startswith("#"):
+                        WHITELISTED_USERS.add(email.lower())
+        print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from file")
+    except Exception as e:
+        print(f"[Auth] Error loading Users file: {e}")
 
 def save_whitelisted_users():
-    """Save whitelisted users to MongoDB AND file for redundancy"""
-    success = False
-    
+    """Save whitelisted users to MongoDB or fallback to Users file"""
     # Try MongoDB first
     if mongodb_enabled and whitelist_collection:
         try:
@@ -110,21 +98,20 @@ def save_whitelisted_users():
             for email in WHITELISTED_USERS:
                 whitelist_collection.insert_one({"email": email.lower()})
             print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users to MongoDB")
-            success = True
+            return True
         except Exception as e:
-            print(f"[Auth] Error saving to MongoDB: {e}")
+            print(f"[Auth] Error saving to MongoDB: {e}, falling back to file")
     
-    # ALWAYS save to file as backup (even if MongoDB succeeded)
+    # Fallback to file
     try:
         with open(USERS_FILE_PATH, "w") as f:
             for email in sorted(WHITELISTED_USERS):
                 f.write(f"{email}\n")
         print(f"[Auth] Saved {len(WHITELISTED_USERS)} whitelisted users to file")
-        success = True
+        return True
     except Exception as e:
         print(f"[Auth] Error saving Users file: {e}")
-    
-    return success
+        return False
 
 # Initial load
 load_whitelisted_users()
@@ -386,7 +373,6 @@ class Job(BaseModel):
     salary_range: Optional[str] = None
     posted_date: datetime
     status: str
-    end_client: Optional[str] = None  # End client from Ceipal
 
 class Candidate(BaseModel):
     id: str
@@ -1288,9 +1274,6 @@ class CeipalClient:
             # Get actual job code
             actual_job_code = str(job_data.get("JobCode", f"job_{len(jobs)+1}"))
             
-            # Extract End Client from Ceipal
-            end_client = job_data.get("EndClient", "")
-            
             # Map Ceipal fields to our Job model
             job = Job(
                 id=actual_job_code,
@@ -1302,8 +1285,7 @@ class CeipalClient:
                 employment_type=job_data.get("Duration", "Contract"),  # Duration as employment type
                 salary_range=salary_range_display,  # Show updated rate to vendors
                 posted_date=self._parse_date(job_data.get("JobCreated", job_data.get("CreatedDate"))),
-                status=job_data.get("JobStatus", "Open"),
-                end_client=end_client if end_client else None
+                status=job_data.get("JobStatus", "Open")
             )
             jobs.append(job)
             
@@ -1713,85 +1695,6 @@ async def get_all_candidates(
         return {"candidates": result, "total": len(result)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
-
-@app.get("/api/admin/dashboard")
-async def get_admin_dashboard(
-    current_user: UserDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get admin dashboard statistics (admin only)"""
-    # Check if admin
-    if current_user.email.lower() != ADMIN_EMAIL.lower():
-        raise HTTPException(status_code=403, detail="Only admin can access dashboard")
-    
-    try:
-        from sqlalchemy.orm import joinedload, func
-        from sqlalchemy import desc
-        
-        # Get total jobs count from cache
-        cached_jobs = ceipal_client._get_cached_jobs() or ceipal_client._jobs_cache or []
-        total_jobs = len(cached_jobs)
-        
-        # Get all candidates with submitter info
-        candidates = db.query(CandidateDB).options(joinedload(CandidateDB.submitted_by)).all()
-        total_submissions = len(candidates)
-        
-        # Job-wise submission counts
-        job_submissions = {}
-        for c in candidates:
-            job_title = c.job_title or "Unknown Job"
-            if job_title not in job_submissions:
-                job_submissions[job_title] = 0
-            job_submissions[job_title] += 1
-        
-        # Sort by submission count (descending)
-        job_submissions_sorted = sorted(job_submissions.items(), key=lambda x: x[1], reverse=True)
-        
-        # Vendor-wise submission counts
-        vendor_stats = {}
-        for c in candidates:
-            if c.submitted_by:
-                vendor_email = c.submitted_by.email
-                vendor_name = c.submitted_by.full_name or vendor_email
-                if vendor_email not in vendor_stats:
-                    vendor_stats[vendor_email] = {
-                        "name": vendor_name,
-                        "email": vendor_email,
-                        "total_submissions": 0,
-                        "jobs": set()
-                    }
-                vendor_stats[vendor_email]["total_submissions"] += 1
-                vendor_stats[vendor_email]["jobs"].add(c.job_title or "Unknown")
-        
-        # Convert sets to counts and sort
-        vendor_list = []
-        for email, stats in vendor_stats.items():
-            vendor_list.append({
-                "name": stats["name"],
-                "email": stats["email"],
-                "total_submissions": stats["total_submissions"],
-                "unique_jobs": len(stats["jobs"])
-            })
-        
-        vendor_list_sorted = sorted(vendor_list, key=lambda x: x["total_submissions"], reverse=True)
-        
-        # Status breakdown
-        status_counts = {}
-        for c in candidates:
-            status = c.status or "submitted"
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        return {
-            "total_jobs": total_jobs,
-            "total_submissions": total_submissions,
-            "job_submissions": [{"job_title": title, "count": count} for title, count in job_submissions_sorted[:20]],
-            "vendor_stats": vendor_list_sorted,
-            "status_breakdown": status_counts,
-            "last_updated": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard data: {str(e)}")
 
 @app.patch("/api/candidates/{candidate_id}/status")
 async def update_candidate_status(
