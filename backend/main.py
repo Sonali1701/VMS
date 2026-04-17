@@ -177,7 +177,12 @@ def send_submission_notification_email(candidate_data: dict, vendor_info: dict) 
         print(f"[Email] Submission notification sent to admin, status: {response.status_code}")
         return response.status_code == 202
     except Exception as e:
+        import traceback
         print(f"[Email] Error sending submission notification: {e}")
+        print(f"[Email] Traceback: {traceback.format_exc()}")
+        print(f"[Email] SendGrid API Key present: {bool(SENDGRID_API_KEY)}")
+        print(f"[Email] From email: {SENDGRID_FROM_EMAIL}")
+        print(f"[Email] To email: {ADMIN_EMAIL}")
         return False
 
 # Load whitelisted users from Users file
@@ -868,7 +873,7 @@ async def get_current_user_info(current_user: UserDB = Depends(get_current_user)
     }
 
 # Admin configuration
-ADMIN_EMAIL = "Admin@radixsol.com"
+ADMIN_EMAIL = "admin@radixsol.com"
 
 # Client names to filter from job descriptions (hidden from vendors)
 CLIENT_NAMES_TO_FILTER = [
@@ -1860,6 +1865,7 @@ async def submit_candidate(
             "email": current_user.email,
             "id": current_user.id
         }
+        print(f"[Submissions] Attempting to send notification email to {ADMIN_EMAIL}")
         email_sent = send_submission_notification_email(candidate_doc, vendor_info)
         if email_sent:
             print(f"[Submissions] Notification email sent to admin for candidate {candidate_id}")
