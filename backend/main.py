@@ -1400,11 +1400,17 @@ async def get_jobs(background_tasks: BackgroundTasks, current_user: UserDB = Dep
         cached_jobs = ceipal_client._get_cached_jobs() or ceipal_client._jobs_cache or []
         
         # Trigger background refresh if cache is empty or older than 5 minutes
-        cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
-        if not cached_jobs or cache_age > timedelta(minutes=5):
-            # Trigger background fetch without waiting (progressive loading)
+        cache_time = ceipal_client._jobs_cache_time
+        if not cached_jobs or cache_time is None:
+            # No cache at all - trigger fetch
             background_tasks.add_task(ceipal_client.fetch_all_jobs_background)
-            print(f"[API] Triggered background job fetch. Current cache: {len(cached_jobs)} jobs")
+            print(f"[API] Triggered background job fetch (no cache). Current: {len(cached_jobs)} jobs")
+        else:
+            cache_age = datetime.now() - cache_time
+            if cache_age > timedelta(minutes=5):
+                # Cache is stale - trigger fetch
+                background_tasks.add_task(ceipal_client.fetch_all_jobs_background)
+                print(f"[API] Triggered background job fetch (cache stale: {cache_age.seconds}s). Current: {len(cached_jobs)} jobs")
         
         # Calculate pagination info
         total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 0
