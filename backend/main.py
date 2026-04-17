@@ -1106,11 +1106,11 @@ class CeipalClient:
                 self._last_total_records = total_records
                 print(f"[Background] Completed fetching {len(all_jobs)} jobs from {page-1} pages")
                 
-        except Exception as e:
-            print(f"[Background] Error fetching jobs: {e}")
-            # Save whatever we got
-            if all_jobs:
-                self._set_cached_jobs(all_jobs)
+            except Exception as e:
+                print(f"[Background] Error fetching jobs: {e}")
+                # Save whatever we got
+                if all_jobs:
+                    self._set_cached_jobs(all_jobs)
     
     async def fetch_more_jobs(self, start_page: int, max_pages: int = 25) -> List[Job]:
         """Fetch additional pages of jobs beyond initial load"""
