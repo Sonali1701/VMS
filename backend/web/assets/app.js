@@ -27,6 +27,7 @@ const els = {
   apiBase: document.getElementById('apiBase'),
   pageTitle: document.getElementById('pageTitle'),
   pageSubtitle: document.getElementById('pageSubtitle'),
+  jobsCount: document.getElementById('jobsCount'),
   viewJobs: document.getElementById('viewJobs'),
   viewSubmissions: document.getElementById('viewSubmissions'),
   viewOffers: document.getElementById('viewOffers'),
@@ -894,6 +895,10 @@ async function loadJobs() {
     allJobs = data.jobs || [];
     hasMoreJobs = data.has_more || false;
     console.log(`[Jobs] Loaded ${allJobs.length} jobs. Has more: ${hasMoreJobs}`);
+    // Update jobs count display
+    if (els.jobsCount) {
+      els.jobsCount.textContent = allJobs.length;
+    }
     renderJobs();
     
     // If no jobs yet or still fetching more, start polling
@@ -914,6 +919,10 @@ async function loadJobs() {
             allJobs = newJobs;
             hasMoreJobs = pollData.has_more || false;
             console.log(`[Jobs] Updated: now ${allJobs.length} jobs`);
+            // Update jobs count display
+            if (els.jobsCount) {
+              els.jobsCount.textContent = allJobs.length;
+            }
             renderJobs();
           }
           
