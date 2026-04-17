@@ -41,25 +41,6 @@ VMS/
 pip install -r requirements.txt
 ```
 
-### 2. Environment Configuration
-Copy `.env.example` to `.env` and configure:
-
-```env
-# Database Configuration - SQLite for development
-DATABASE_URL=sqlite:///./vms_database.db
-
-# Ceipal API Configuration
-CEIPAL_AUTH_URL=https://api.ceipal.com/v1/createAuthtoken/
-CEIPAL_REPORTS_URL=https://bi.ceipal.com/ReportDetails/getReportsData/d2RyRHN0Z0s3R29aNWdyN1h2TnBLUT09
-CEIPAL_EMAIL=amir@radixsol.com
-CEIPAL_PASSWORD=your_actual_password_here
-CEIPAL_API_KEY=2693f0ed28f2250811fe40294e97e108a56afa9043e5336da4
-
-# Application Settings
-SECRET_KEY=your-secret-key-here
-UPLOAD_DIR=./uploads
-MAX_FILE_SIZE=10485760  # 10MB
-```
 
 ### 3. Database Setup
 ```bash
