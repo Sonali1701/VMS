@@ -215,13 +215,21 @@ async function removeUser(email) {
 async function loadDashboard() {
   if (!isAdmin()) return;
   
+  console.log('[Dashboard] Loading dashboard...');
+  console.log('[Dashboard] Elements:', {
+    dashTotalJobs: els.dashTotalJobs,
+    dashTotalSubmissions: els.dashTotalSubmissions,
+    dashActiveVendors: els.dashActiveVendors
+  });
+  
   try {
     const data = await apiGetAuth('/api/admin/dashboard');
+    console.log('[Dashboard] Data received:', data);
     
     // Update summary cards
-    els.dashTotalJobs.textContent = data.total_jobs || 0;
-    els.dashTotalSubmissions.textContent = data.total_submissions || 0;
-    els.dashActiveVendors.textContent = data.vendor_stats ? data.vendor_stats.length : 0;
+    if (els.dashTotalJobs) els.dashTotalJobs.textContent = data.total_jobs || 0;
+    if (els.dashTotalSubmissions) els.dashTotalSubmissions.textContent = data.total_submissions || 0;
+    if (els.dashActiveVendors) els.dashActiveVendors.textContent = data.vendor_stats ? data.vendor_stats.length : 0;
     
     // Update last updated time
     if (data.last_updated && els.dashboardLastUpdated) {
@@ -277,8 +285,14 @@ async function loadDashboard() {
     }
     
   } catch (e) {
-    console.error('Failed to load dashboard:', e);
+    console.error('[Dashboard] Failed to load dashboard:', e);
     if (els.dashTotalJobs) els.dashTotalJobs.textContent = 'Error';
+    if (els.dashTotalSubmissions) els.dashTotalSubmissions.textContent = '-';
+    if (els.dashActiveVendors) els.dashActiveVendors.textContent = '-';
+    // Show error message in status breakdown
+    if (els.dashStatusBreakdown) {
+      els.dashStatusBreakdown.innerHTML = `<div style="color: #dc2626;">Error loading dashboard: ${e.message}</div>`;
+    }
   }
 }
 

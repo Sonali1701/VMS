@@ -65,6 +65,7 @@ def load_whitelisted_users():
     """Load whitelisted users from MongoDB or fallback to Users file"""
     global WHITELISTED_USERS
     WHITELISTED_USERS = set()
+    loaded_from_mongodb = False
     
     # Try MongoDB first
     if mongodb_enabled and whitelist_collection:
@@ -72,21 +73,30 @@ def load_whitelisted_users():
             for doc in whitelist_collection.find():
                 WHITELISTED_USERS.add(doc["email"].lower())
             print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from MongoDB")
-            return
+            loaded_from_mongodb = True
+            # Sync to file to keep them in sync
+            try:
+                with open(USERS_FILE_PATH, "w") as f:
+                    for email in sorted(WHITELISTED_USERS):
+                        f.write(f"{email}\n")
+                print(f"[Auth] Synced {len(WHITELISTED_USERS)} whitelisted users to file")
+            except Exception as e:
+                print(f"[Auth] Error syncing to file: {e}")
         except Exception as e:
             print(f"[Auth] Error loading from MongoDB: {e}, falling back to file")
     
-    # Fallback to file
-    try:
-        if os.path.exists(USERS_FILE_PATH):
-            with open(USERS_FILE_PATH, "r") as f:
-                for line in f:
-                    email = line.strip()
-                    if email and not email.startswith("#"):
-                        WHITELISTED_USERS.add(email.lower())
-        print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from file")
-    except Exception as e:
-        print(f"[Auth] Error loading Users file: {e}")
+    # Fallback to file if MongoDB failed or not enabled
+    if not loaded_from_mongodb:
+        try:
+            if os.path.exists(USERS_FILE_PATH):
+                with open(USERS_FILE_PATH, "r") as f:
+                    for line in f:
+                        email = line.strip()
+                        if email and not email.startswith("#"):
+                            WHITELISTED_USERS.add(email.lower())
+            print(f"[Auth] Loaded {len(WHITELISTED_USERS)} whitelisted users from file")
+        except Exception as e:
+            print(f"[Auth] Error loading Users file: {e}")
 
 def save_whitelisted_users():
     """Save whitelisted users to MongoDB AND file for redundancy"""
