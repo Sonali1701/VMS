@@ -27,6 +27,7 @@ const els = {
   apiBase: document.getElementById('apiBase'),
   pageTitle: document.getElementById('pageTitle'),
   pageSubtitle: document.getElementById('pageSubtitle'),
+  jobsCount: document.getElementById('jobsCount'),
   viewJobs: document.getElementById('viewJobs'),
   viewSubmissions: document.getElementById('viewSubmissions'),
   viewOffers: document.getElementById('viewOffers'),
@@ -530,6 +531,19 @@ function renderJobs() {
   els.jobsGrid.innerHTML = '';
   const filtered = allJobs.filter(jobMatches);
 
+  // Update job count display
+  if (els.jobsCount) {
+    const searchTerm = els.searchInput ? els.searchInput.value.trim() : '';
+    const statusFilter = els.statusFilter ? els.statusFilter.value : 'all';
+    const hasFilters = searchTerm || statusFilter !== 'all';
+    
+    if (hasFilters) {
+      els.jobsCount.textContent = `Showing ${filtered.length} of ${allJobs.length} jobs`;
+    } else {
+      els.jobsCount.textContent = `Total Jobs: ${allJobs.length}`;
+    }
+  }
+
   // Show/hide empty state and update message
   if (filtered.length === 0) {
     els.jobsEmpty.hidden = false;
@@ -555,6 +569,7 @@ function renderJobs() {
       <span class="tag">${job.location || 'Location: N/A'}</span>
       <span class="tag">${job.employment_type || 'Type: N/A'}</span>
       <span class="tag">Status: ${job.status || 'N/A'}</span>
+      ${job.end_client ? `<span class="tag">End Client: ${job.end_client}</span>` : ''}
     `;
 
     const desc = document.createElement('div');
