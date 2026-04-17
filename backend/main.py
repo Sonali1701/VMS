@@ -386,6 +386,7 @@ class Job(BaseModel):
     salary_range: Optional[str] = None
     posted_date: datetime
     status: str
+    end_client: Optional[str] = None  # End client from Ceipal
 
 class Candidate(BaseModel):
     id: str
@@ -1287,6 +1288,9 @@ class CeipalClient:
             # Get actual job code
             actual_job_code = str(job_data.get("JobCode", f"job_{len(jobs)+1}"))
             
+            # Extract End Client from Ceipal
+            end_client = job_data.get("EndClient", "")
+            
             # Map Ceipal fields to our Job model
             job = Job(
                 id=actual_job_code,
@@ -1298,7 +1302,8 @@ class CeipalClient:
                 employment_type=job_data.get("Duration", "Contract"),  # Duration as employment type
                 salary_range=salary_range_display,  # Show updated rate to vendors
                 posted_date=self._parse_date(job_data.get("JobCreated", job_data.get("CreatedDate"))),
-                status=job_data.get("JobStatus", "Open")
+                status=job_data.get("JobStatus", "Open"),
+                end_client=end_client if end_client else None
             )
             jobs.append(job)
             
