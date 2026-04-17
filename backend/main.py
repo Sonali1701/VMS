@@ -34,7 +34,7 @@ whitelist_collection = None
 
 def init_mongodb():
     """Initialize MongoDB connection"""
-    global mongo_client, db, users_collection, whitelist_collection
+    global mongo_client, db, users_collection, whitelist_collection, candidates_collection, fs
     
     if not MONGODB_URI:
         print("[MongoDB] No MONGODB_URI set, using fallback JSON storage")
@@ -45,10 +45,15 @@ def init_mongodb():
         db = mongo_client.vms
         users_collection = db.users
         whitelist_collection = db.whitelist
+        candidates_collection = db.candidates
+        
+        # Initialize GridFS for file storage
+        from gridfs import GridFS
+        fs = GridFS(db)
         
         # Test connection
         mongo_client.admin.command('ping')
-        print("[MongoDB] Connected successfully")
+        print("[MongoDB] Connected successfully (with GridFS)")
         return True
     except Exception as e:
         print(f"[MongoDB] Connection failed: {e}")
@@ -1694,10 +1699,9 @@ async def submit_candidate(
     candidate_summary: str = Form(...),
     job_id: str = Form(...),
     resume: UploadFile = File(...),
-    db: Session = Depends(get_db),
     current_user: UserDB = Depends(get_current_user)
 ):
-    """Submit candidate resume for a job (requires authentication)"""
+    """Submit candidate resume for a job (requires authentication) - MongoDB persistent storage"""
     try:
         # Validate file
         if resume.size > MAX_FILE_SIZE:
@@ -1708,42 +1712,80 @@ async def submit_candidate(
         if file_extension not in allowed_extensions:
             raise HTTPException(status_code=400, detail="Invalid file type")
         
-        # Save resume
+        # Read resume content
+        content = await resume.read()
+        
+        # Store resume in GridFS (persistent across redeploys)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{candidate_name.replace(' ', '_')}_{timestamp}.{file_extension}"
-        file_path = os.path.join(UPLOAD_DIR, filename)
         
-        async with aiofiles.open(file_path, 'wb') as f:
-            content = await resume.read()
-            await f.write(content)
+        if mongodb_enabled and fs:
+            # Store in GridFS
+            resume_file_id = fs.put(
+                content,
+                filename=filename,
+                content_type=resume.content_type or 'application/octet-stream',
+                metadata={
+                    'candidate_name': candidate_name,
+                    'job_id': job_id,
+                    'uploaded_by': current_user.email,
+                    'uploaded_at': datetime.now().isoformat()
+                }
+            )
+            resume_storage_id = str(resume_file_id)
+            storage_type = "gridfs"
+            print(f"[Submissions] Resume stored in GridFS: {resume_storage_id}")
+        else:
+            # Fallback to local filesystem if MongoDB not available
+            file_path = os.path.join(UPLOAD_DIR, filename)
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(content)
+            resume_storage_id = file_path
+            storage_type = "local"
+            print(f"[Submissions] Resume stored locally: {file_path}")
         
         # Generate unique candidate ID
-        count = db.query(CandidateDB).count()
-        candidate_id = f"candidate_{count + 1}"
+        candidate_id = f"candidate_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid4())[:8]}"
         
-        # Store candidate in database with submitter info
-        db_candidate = CandidateDB(
-            id=candidate_id,
-            name=candidate_name,
-            email=email,
-            phone=phone,
-            job_id=job_id,
-            resume_path=file_path,
-            submitted_date=datetime.now(),
-            status="submitted",
-            submitted_by_user_id=current_user.id,  # Track who submitted
-            bill_rate=bill_rate,
-            current_location=current_location,
-            primary_skills=primary_skills,
-            job_title=job_title,
-            years_experience=years_experience,
-            tentative_start_date=tentative_start_date,
-            rto=rto,
-            candidate_summary=candidate_summary
-        )
-        db.add(db_candidate)
-        db.commit()
-        db.refresh(db_candidate)
+        # Store candidate in MongoDB with submitter info
+        candidate_doc = {
+            "id": candidate_id,
+            "name": candidate_name,
+            "email": email,
+            "phone": phone,
+            "job_id": job_id,
+            "resume_storage_id": resume_storage_id,
+            "resume_storage_type": storage_type,
+            "resume_filename": filename,
+            "submitted_date": datetime.now().isoformat(),
+            "status": "submitted",
+            "submitted_by_user_id": current_user.id,
+            "submitted_by_email": current_user.email,
+            "submitted_by_name": current_user.full_name,
+            "bill_rate": bill_rate,
+            "current_location": current_location,
+            "primary_skills": primary_skills,
+            "job_title": job_title,
+            "years_experience": years_experience,
+            "tentative_start_date": tentative_start_date,
+            "rto": rto,
+            "candidate_summary": candidate_summary
+        }
+        
+        if mongodb_enabled and candidates_collection:
+            candidates_collection.insert_one(candidate_doc)
+            print(f"[Submissions] Candidate {candidate_id} stored in MongoDB")
+        else:
+            # Fallback: store in local JSON file
+            candidates_file = os.path.join(DATA_DIR, "candidates.json")
+            existing = []
+            if os.path.exists(candidates_file):
+                with open(candidates_file, 'r') as f:
+                    existing = json.load(f)
+            existing.append(candidate_doc)
+            with open(candidates_file, 'w') as f:
+                json.dump(existing, f, indent=2, default=str)
+            print(f"[Submissions] Candidate {candidate_id} stored in JSON (MongoDB not available)")
         
         return {
             "message": "Candidate submitted successfully",
@@ -1753,82 +1795,90 @@ async def submit_candidate(
         }
         
     except Exception as e:
-        db.rollback()
+        print(f"[Submissions] Error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to submit candidate: {str(e)}")
 
 @app.get("/api/candidates/job/{job_id}")
-async def get_candidates_for_job(job_id: str, db: Session = Depends(get_db)):
-    """Get all candidates submitted for a specific job"""
+async def get_candidates_for_job(job_id: str):
+    """Get all candidates submitted for a specific job - MongoDB persistent storage"""
     try:
-        job_candidates = db.query(CandidateDB).filter(CandidateDB.job_id == job_id).all()
+        job_candidates = []
+        
+        if mongodb_enabled and candidates_collection:
+            # Query MongoDB
+            cursor = candidates_collection.find({"job_id": job_id})
+            for doc in cursor:
+                doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
+                job_candidates.append(doc)
+        else:
+            # Fallback to JSON file
+            candidates_file = os.path.join(DATA_DIR, "candidates.json")
+            if os.path.exists(candidates_file):
+                with open(candidates_file, 'r') as f:
+                    all_candidates = json.load(f)
+                    job_candidates = [c for c in all_candidates if c.get("job_id") == job_id]
+        
         return {"candidates": job_candidates, "total": len(job_candidates)}
     except Exception as e:
+        print(f"[Submissions] Error fetching job candidates: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
 
 @app.get("/api/candidates")
 async def get_all_candidates(
-    current_user: UserDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: UserDB = Depends(get_current_user)
 ):
-    """Get submitted candidates with submitter info. Vendors see only their own submissions, admin sees all."""
+    """Get submitted candidates with submitter info. Vendors see only their own submissions, admin sees all. - MongoDB persistent storage"""
     try:
-        from sqlalchemy.orm import joinedload
+        candidates = []
+        is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
         
-        # Build query
-        query = db.query(CandidateDB).options(joinedload(CandidateDB.submitted_by))
+        if mongodb_enabled and candidates_collection:
+            # Query MongoDB
+            if is_admin:
+                cursor = candidates_collection.find()
+            else:
+                cursor = candidates_collection.find({"submitted_by_user_id": current_user.id})
+            
+            for doc in cursor:
+                doc["_id"] = str(doc["_id"])
+                # Build submitted_by info from stored data
+                doc["submitted_by"] = {
+                    "id": doc.get("submitted_by_user_id"),
+                    "full_name": doc.get("submitted_by_name"),
+                    "email": doc.get("submitted_by_email")
+                } if doc.get("submitted_by_user_id") else None
+                candidates.append(doc)
+        else:
+            # Fallback to JSON file
+            candidates_file = os.path.join(DATA_DIR, "candidates.json")
+            if os.path.exists(candidates_file):
+                with open(candidates_file, 'r') as f:
+                    all_candidates = json.load(f)
+                    if is_admin:
+                        candidates = all_candidates
+                    else:
+                        candidates = [c for c in all_candidates if c.get("submitted_by_user_id") == current_user.id]
+                    
+                    for c in candidates:
+                        c["submitted_by"] = {
+                            "id": c.get("submitted_by_user_id"),
+                            "full_name": c.get("submitted_by_name"),
+                            "email": c.get("submitted_by_email")
+                        }
         
-        # If not admin, filter by current user
-        if current_user.email.lower() != ADMIN_EMAIL.lower():
-            query = query.filter(CandidateDB.submitted_by_user_id == current_user.id)
-        
-        candidates = query.all()
-        
-        result = []
-        for c in candidates:
-            candidate_dict = {
-                "id": c.id,
-                "name": c.name,
-                "email": c.email,
-                "phone": c.phone,
-                "job_id": c.job_id,
-                "resume_path": c.resume_path,
-                "submitted_date": c.submitted_date,
-                "status": c.status,
-                "bill_rate": c.bill_rate,
-                "current_location": c.current_location,
-                "primary_skills": c.primary_skills,
-                "job_title": c.job_title,
-                "years_experience": c.years_experience,
-                "tentative_start_date": c.tentative_start_date,
-                "rto": c.rto,
-                "candidate_summary": c.candidate_summary,
-                "submitted_by_user_id": c.submitted_by_user_id,
-                "submitted_by": {
-                    "id": c.submitted_by.id,
-                    "full_name": c.submitted_by.full_name,
-                    "email": c.submitted_by.email
-                } if c.submitted_by else None
-            }
-            result.append(candidate_dict)
-        
-        return {"candidates": result, "total": len(result)}
+        return {"candidates": candidates, "total": len(candidates)}
     except Exception as e:
+        print(f"[Submissions] Error fetching candidates: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch candidates: {str(e)}")
 
 @app.patch("/api/candidates/{candidate_id}/status")
 async def update_candidate_status(
     candidate_id: str,
     status: str,
-    current_user: UserDB = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: UserDB = Depends(get_current_user)
 ):
-    """Update candidate status. Only admin can update status."""
+    """Update candidate status. Only admin can update status. - MongoDB persistent storage"""
     try:
-        # Find the candidate
-        candidate = db.query(CandidateDB).filter(CandidateDB.id == candidate_id).first()
-        if not candidate:
-            raise HTTPException(status_code=404, detail="Candidate not found")
-        
         # Check permissions - only admin can update status
         is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
         if not is_admin:
@@ -1839,34 +1889,103 @@ async def update_candidate_status(
         if status.lower() not in valid_statuses:
             raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
         
-        candidate.status = status.lower()
-        db.commit()
+        if mongodb_enabled and candidates_collection:
+            # Update in MongoDB
+            result = candidates_collection.update_one(
+                {"id": candidate_id},
+                {"$set": {"status": status.lower()}}
+            )
+            if result.matched_count == 0:
+                raise HTTPException(status_code=404, detail="Candidate not found")
+        else:
+            # Fallback: Update in JSON file
+            candidates_file = os.path.join(DATA_DIR, "candidates.json")
+            if os.path.exists(candidates_file):
+                with open(candidates_file, 'r') as f:
+                    all_candidates = json.load(f)
+                
+                candidate_found = False
+                for c in all_candidates:
+                    if c.get("id") == candidate_id:
+                        c["status"] = status.lower()
+                        candidate_found = True
+                        break
+                
+                if not candidate_found:
+                    raise HTTPException(status_code=404, detail="Candidate not found")
+                
+                with open(candidates_file, 'w') as f:
+                    json.dump(all_candidates, f, indent=2)
         
         return {"message": "Status updated successfully", "candidate_id": candidate_id, "status": status.lower()}
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        print(f"[Submissions] Error updating status: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update status: {str(e)}")
 
 @app.get("/api/resumes/{candidate_id}")
-async def download_resume(candidate_id: str, db: Session = Depends(get_db)):
-    """Download resume file for a candidate"""
+async def download_resume(candidate_id: str):
+    """Download resume file for a candidate - MongoDB GridFS or local fallback"""
     try:
-        candidate = db.query(CandidateDB).filter(CandidateDB.id == candidate_id).first()
+        # Find candidate
+        candidate = None
+        if mongodb_enabled and candidates_collection:
+            candidate = candidates_collection.find_one({"id": candidate_id})
+        else:
+            # Fallback to JSON file
+            candidates_file = os.path.join(DATA_DIR, "candidates.json")
+            if os.path.exists(candidates_file):
+                with open(candidates_file, 'r') as f:
+                    all_candidates = json.load(f)
+                    for c in all_candidates:
+                        if c.get("id") == candidate_id:
+                            candidate = c
+                            break
+        
         if not candidate:
             raise HTTPException(status_code=404, detail="Candidate not found")
         
-        resume_path = candidate.resume_path
-        if not os.path.exists(resume_path):
-            raise HTTPException(status_code=404, detail="Resume file not found")
+        storage_type = candidate.get("resume_storage_type", "local")
         
-        return FileResponse(
-            resume_path,
-            filename=os.path.basename(resume_path),
-            media_type="application/octet-stream"
-        )
+        if storage_type == "gridfs" and mongodb_enabled and fs:
+            # Retrieve from GridFS
+            from bson.objectid import ObjectId
+            file_id = candidate.get("resume_storage_id")
+            if not file_id:
+                raise HTTPException(status_code=404, detail="Resume file reference not found")
+            
+            grid_file = fs.get(ObjectId(file_id))
+            if not grid_file:
+                raise HTTPException(status_code=404, detail="Resume file not found in storage")
+            
+            # Create a temporary file for the response
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(candidate.get("resume_filename", "resume.pdf"))[1]) as tmp:
+                tmp.write(grid_file.read())
+                tmp_path = tmp.name
+            
+            return FileResponse(
+                tmp_path,
+                filename=candidate.get("resume_filename", "resume.pdf"),
+                media_type=grid_file.content_type or "application/octet-stream",
+                background=None  # File will be cleaned up after response
+            )
+        else:
+            # Fallback: Retrieve from local filesystem
+            resume_path = candidate.get("resume_storage_id")
+            if not resume_path or not os.path.exists(resume_path):
+                raise HTTPException(status_code=404, detail="Resume file not found")
+            
+            return FileResponse(
+                resume_path,
+                filename=os.path.basename(resume_path),
+                media_type="application/octet-stream"
+            )
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"[Submissions] Error downloading resume: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download resume: {str(e)}")
 
 if __name__ == "__main__":
