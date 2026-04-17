@@ -115,6 +115,69 @@ def cleanup_expired_tokens():
     if expired:
         print(f"[Auth] Cleaned up {len(expired)} expired reset tokens")
 
+def send_submission_notification_email(candidate_data: dict, vendor_info: dict) -> bool:
+    """Send candidate submission notification to admin via SendGrid"""
+    if not SENDGRID_API_KEY:
+        print(f"[Email] SendGrid not configured. Cannot send submission notification.")
+        return False
+    
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        
+        # Build email content
+        candidate_name = candidate_data.get('name', 'N/A')
+        job_title = candidate_data.get('job_title', 'N/A')
+        job_id = candidate_data.get('job_id', 'N/A')
+        vendor_name = vendor_info.get('full_name', 'N/A')
+        vendor_email = vendor_info.get('email', 'N/A')
+        bill_rate = candidate_data.get('bill_rate', 'N/A')
+        location = candidate_data.get('current_location', 'N/A')
+        skills = candidate_data.get('primary_skills', 'N/A')
+        candidate_email = candidate_data.get('email', 'N/A')
+        candidate_phone = candidate_data.get('phone', 'N/A')
+        
+        html_content = f'''
+            <h2>New Candidate Submission</h2>
+            <p>A new candidate has been submitted by <strong>{vendor_name}</strong> ({vendor_email}).</p>
+            
+            <h3>Candidate Details:</h3>
+            <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Name:</td><td style="padding: 8px; border: 1px solid #ddd;">{candidate_name}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Email:</td><td style="padding: 8px; border: 1px solid #ddd;">{candidate_email}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Phone:</td><td style="padding: 8px; border: 1px solid #ddd;">{candidate_phone}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job Title:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_title}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job ID:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_id}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Bill Rate:</td><td style="padding: 8px; border: 1px solid #ddd;">{bill_rate}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Location:</td><td style="padding: 8px; border: 1px solid #ddd;">{location}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Skills:</td><td style="padding: 8px; border: 1px solid #ddd;">{skills}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Submitted By:</td><td style="padding: 8px; border: 1px solid #ddd;">{vendor_name} ({vendor_email})</td></tr>
+            </table>
+            
+            <p style="margin-top: 20px;">
+                <a href="{APP_URL}" style="padding: 12px 24px; background: #7c3aed; color: white; text-decoration: none; border-radius: 6px;">View in VMS Dashboard</a>
+            </p>
+            
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                This is an automated notification from the Vendor Management System.
+            </p>
+        '''
+        
+        message = Mail(
+            from_email=SENDGRID_FROM_EMAIL,
+            to_emails=ADMIN_EMAIL,  # Send to admin
+            subject=f'New Candidate Submission: {candidate_name} for {job_title}',
+            html_content=html_content
+        )
+        
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(f"[Email] Submission notification sent to admin, status: {response.status_code}")
+        return response.status_code == 202
+    except Exception as e:
+        print(f"[Email] Error sending submission notification: {e}")
+        return False
+
 # Load whitelisted users from Users file
 WHITELISTED_USERS = set()
 USERS_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", "Users")
@@ -1786,6 +1849,18 @@ async def submit_candidate(
             with open(candidates_file, 'w') as f:
                 json.dump(existing, f, indent=2, default=str)
             print(f"[Submissions] Candidate {candidate_id} stored in JSON (MongoDB not available)")
+        
+        # Send email notification to admin
+        vendor_info = {
+            "full_name": current_user.full_name,
+            "email": current_user.email,
+            "id": current_user.id
+        }
+        email_sent = send_submission_notification_email(candidate_doc, vendor_info)
+        if email_sent:
+            print(f"[Submissions] Notification email sent to admin for candidate {candidate_id}")
+        else:
+            print(f"[Submissions] Failed to send notification email for candidate {candidate_id}")
         
         return {
             "message": "Candidate submitted successfully",
