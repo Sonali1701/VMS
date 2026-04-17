@@ -569,6 +569,7 @@ function renderJobs() {
       <span class="tag">${job.location || 'Location: N/A'}</span>
       <span class="tag">${job.employment_type || 'Type: N/A'}</span>
       <span class="tag">Status: ${job.status || 'N/A'}</span>
+      ${job.end_client ? `<span class="tag">End Client: ${job.end_client}</span>` : ''}
     `;
 
     const desc = document.createElement('div');
