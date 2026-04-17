@@ -50,8 +50,13 @@ const els = {
   authSubmitBtn: document.getElementById('authSubmitBtn'),
   authAlert: document.getElementById('authAlert'),
   forgotPasswordLink: document.getElementById('forgotPasswordLink'),
+  forgotPasswordForm: document.getElementById('forgotPasswordForm'),
+  forgotEmail: document.getElementById('forgotEmail'),
+  forgotSubmitBtn: document.getElementById('forgotSubmitBtn'),
+  forgotAlert: document.getElementById('forgotAlert'),
+  backToLoginFromForgot: document.getElementById('backToLoginFromForgot'),
   resetPasswordForm: document.getElementById('resetPasswordForm'),
-  resetEmail: document.getElementById('resetEmail'),
+  resetToken: document.getElementById('resetToken'),
   resetPassword: document.getElementById('resetPassword'),
   resetPasswordConfirm: document.getElementById('resetPasswordConfirm'),
   resetSubmitBtn: document.getElementById('resetSubmitBtn'),
@@ -256,15 +261,26 @@ function logout() {
 
 // Password reset functions
 function showForgotPasswordForm() {
-  // Hide login form, show reset form
+  // Hide login form, show forgot password form (step 1)
   els.authEmail.parentElement.parentElement.style.display = 'none';
+  els.forgotPasswordForm.style.display = 'block';
+  els.forgotAlert.hidden = true;
+  els.forgotAlert.textContent = '';
+}
+
+function showResetPasswordForm(token) {
+  // Show reset password form (step 2 - from email link)
+  els.authEmail.parentElement.parentElement.style.display = 'none';
+  els.forgotPasswordForm.style.display = 'none';
   els.resetPasswordForm.style.display = 'block';
+  els.resetToken.value = token || '';
   els.resetAlert.hidden = true;
   els.resetAlert.textContent = '';
 }
 
 function showLoginForm() {
-  // Hide reset form, show login form
+  // Hide all forms, show login form
+  els.forgotPasswordForm.style.display = 'none';
   els.resetPasswordForm.style.display = 'none';
   els.authEmail.parentElement.parentElement.style.display = 'block';
   els.authAlert.hidden = true;
@@ -277,24 +293,68 @@ function showResetAlert(type, msg) {
   els.resetAlert.hidden = false;
 }
 
+function clearForgotAlert() {
+  els.forgotAlert.hidden = true;
+  els.forgotAlert.textContent = '';
+}
+
 function clearResetAlert() {
   els.resetAlert.hidden = true;
   els.resetAlert.textContent = '';
 }
 
+async function handleForgotPassword() {
+  clearForgotAlert();
+  
+  const email = els.forgotEmail.value.trim();
+  
+  if (!email) return showForgotAlert('error', 'Email is required');
+  
+  const body = { email };
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.detail || data.message || `Error: ${res.status}`);
+    }
+    
+    // Clear form
+    els.forgotEmail.value = '';
+    
+    // Show success message
+    showForgotAlert('ok', 'Password reset email sent! Please check your inbox.');
+    
+  } catch (e) {
+    showForgotAlert('error', e.message);
+  }
+}
+
+function showForgotAlert(type, msg) {
+  els.forgotAlert.className = 'alert alert--' + type;
+  els.forgotAlert.textContent = msg;
+  els.forgotAlert.hidden = false;
+}
+
 async function handlePasswordReset() {
   clearResetAlert();
   
-  const email = els.resetEmail.value.trim();
+  const token = els.resetToken.value;
   const password = els.resetPassword.value;
   const confirmPassword = els.resetPasswordConfirm.value;
   
-  if (!email) return showResetAlert('error', 'Email is required');
+  if (!token) return showResetAlert('error', 'Reset token is missing. Please use the link from your email.');
   if (!password) return showResetAlert('error', 'Password is required');
   if (password !== confirmPassword) return showResetAlert('error', 'Passwords do not match');
   if (password.length < 6) return showResetAlert('error', 'Password must be at least 6 characters');
   
-  const body = { email, password };
+  const body = { token, password };
   
   try {
     const res = await fetch(`${API_BASE}/api/auth/reset-password`, {
@@ -303,20 +363,13 @@ async function handlePasswordReset() {
       body: JSON.stringify(body)
     });
     
-    const text = await res.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(text.includes('Internal Server Error') ? 'Server error. Please try again.' : text.slice(0, 100));
-    }
+    const data = await res.json();
     
     if (!res.ok) {
       throw new Error(data.detail || data.message || `Error: ${res.status}`);
     }
     
     // Clear form
-    els.resetEmail.value = '';
     els.resetPassword.value = '';
     els.resetPasswordConfirm.value = '';
     
@@ -1395,8 +1448,29 @@ if (els.backToLoginLink) {
   });
 }
 
+if (els.backToLoginFromForgot) {
+  els.backToLoginFromForgot.addEventListener('click', (e) => {
+    e.preventDefault();
+    showLoginForm();
+  });
+}
+
+if (els.forgotSubmitBtn) {
+  els.forgotSubmitBtn.addEventListener('click', handleForgotPassword);
+}
+
 if (els.resetSubmitBtn) {
   els.resetSubmitBtn.addEventListener('click', handlePasswordReset);
+}
+
+// Check for reset token in URL (user clicked email link)
+const urlParams = new URLSearchParams(window.location.search);
+const resetToken = urlParams.get('token');
+if (resetToken) {
+  // Show reset password form directly
+  showResetPasswordForm(resetToken);
+  // Clear token from URL
+  window.history.replaceState({}, document.title, window.location.pathname);
 }
 
 // Admin user management event listener

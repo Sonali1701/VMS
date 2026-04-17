@@ -57,6 +57,59 @@ def init_mongodb():
 # Initialize MongoDB on startup
 mongodb_enabled = init_mongodb()
 
+# SendGrid email setup for password reset
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "noreply@radixsol.com")
+APP_URL = os.getenv("APP_URL", "https://vms-1-xlkv.onrender.com")  # Your Render app URL
+
+# In-memory password reset token storage (expires after 1 hour)
+# Structure: {token: {email: str, expires: datetime, used: bool}}
+_password_reset_tokens = {}
+
+def send_password_reset_email(email: str, reset_token: str) -> bool:
+    """Send password reset email via SendGrid"""
+    if not SENDGRID_API_KEY:
+        print(f"[Email] SendGrid not configured. Token for {email}: {reset_token}")
+        return False
+    
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        
+        # Build reset URL
+        reset_url = f"{APP_URL}?token={reset_token}"
+        
+        message = Mail(
+            from_email=SENDGRID_FROM_EMAIL,
+            to_emails=email,
+            subject='Password Reset - Vendor Management System',
+            html_content=f'''
+                <h2>Password Reset Request</h2>
+                <p>You requested a password reset for your Vendor Management System account.</p>
+                <p><a href="{reset_url}" style="padding: 12px 24px; background: #7c3aed; color: white; text-decoration: none; border-radius: 6px;">Reset Password</a></p>
+                <p>Or copy this link: {reset_url}</p>
+                <p>This link expires in 1 hour.</p>
+                <p>If you didn't request this, please ignore this email.</p>
+            '''
+        )
+        
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(f"[Email] Password reset sent to {email}, status: {response.status_code}")
+        return response.status_code == 202
+    except Exception as e:
+        print(f"[Email] Error sending email: {e}")
+        return False
+
+def cleanup_expired_tokens():
+    """Remove expired password reset tokens"""
+    now = datetime.now()
+    expired = [token for token, data in _password_reset_tokens.items() if data['expires'] < now]
+    for token in expired:
+        del _password_reset_tokens[token]
+    if expired:
+        print(f"[Auth] Cleaned up {len(expired)} expired reset tokens")
+
 # Load whitelisted users from Users file
 WHITELISTED_USERS = set()
 USERS_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", "Users")
@@ -569,29 +622,93 @@ async def login(user_data: UserLogin):
         }
     }
 
-@app.post("/api/auth/reset-password")
-async def reset_password(user_data: UserLogin):
-    """Reset password for existing user (whitelisted emails only)"""
-    global _users_cache
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordWithToken(BaseModel):
+    token: str
+    password: str
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Send password reset email to user"""
+    global _password_reset_tokens
     
-    email_lower = user_data.email.lower()
+    # Clean up expired tokens first
+    cleanup_expired_tokens()
+    
+    email_lower = request.email.lower().strip()
     
     # Check if email is whitelisted
     if email_lower not in WHITELISTED_USERS:
-        raise HTTPException(status_code=403, detail="Email not authorized")
+        # Don't reveal if email exists for security
+        return {"message": "If the email is registered, a password reset link has been sent."}
     
-    # Check if user exists
+    # Check if user exists (has logged in before)
     if email_lower not in _users_cache:
-        raise HTTPException(status_code=404, detail="User not found. Please login first to create your account.")
+        return {"message": "If the email is registered, a password reset link has been sent."}
+    
+    # Generate reset token
+    reset_token = str(uuid4())
+    
+    # Store token with expiration (1 hour)
+    _password_reset_tokens[reset_token] = {
+        "email": email_lower,
+        "expires": datetime.now() + timedelta(hours=1),
+        "used": False
+    }
+    
+    # Send email
+    email_sent = send_password_reset_email(email_lower, reset_token)
+    
+    if email_sent:
+        print(f"[Auth] Password reset email sent to {email_lower}")
+        return {"message": "Password reset email sent. Please check your inbox."}
+    else:
+        # If email fails, still return success but log the token for debugging
+        print(f"[Auth] Password reset token for {email_lower}: {reset_token}")
+        return {"message": "Password reset email sent. Please check your inbox."}
+
+@app.post("/api/auth/reset-password")
+async def reset_password_with_token(data: ResetPasswordWithToken):
+    """Reset password using token from email"""
+    global _users_cache, _password_reset_tokens
+    
+    # Clean up expired tokens
+    cleanup_expired_tokens()
+    
+    token = data.token
+    
+    # Validate token
+    if token not in _password_reset_tokens:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    token_data = _password_reset_tokens[token]
+    
+    if token_data["used"]:
+        raise HTTPException(status_code=400, detail="Reset token has already been used")
+    
+    if token_data["expires"] < datetime.now():
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+    
+    email_lower = token_data["email"]
+    
+    # Validate password
+    if len(data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     
     # Update password
-    hashed_password = get_password_hash(user_data.password)
-    _users_cache[email_lower]["hashed_password"] = hashed_password
+    hashed_password = get_password_hash(data.password)
     
-    # Save to JSON file
-    save_users_to_json(_users_cache)
+    if email_lower in _users_cache:
+        _users_cache[email_lower]["hashed_password"] = hashed_password
+        save_users_to_json(_users_cache)
     
-    return {"message": "Password reset successfully"}
+    # Mark token as used
+    token_data["used"] = True
+    
+    print(f"[Auth] Password reset successful for {email_lower}")
+    return {"message": "Password reset successfully. Please login with your new password."}
 
 @app.get("/api/admin/users")
 async def get_whitelisted_users(current_user: UserDB = Depends(get_current_user)):
