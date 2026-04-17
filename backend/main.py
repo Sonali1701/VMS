@@ -1010,64 +1010,47 @@ class CeipalClient:
     
     async def fetch_all_jobs_background(self):
         """Background task to fetch all jobs progressively and update cache"""
-        # Use lock to prevent concurrent fetches
-        async with self._fetch_lock:
-            print("[Background] Starting progressive job fetch...")
-            all_jobs = []
-            consecutive_429_errors = 0
-            max_429_retries = 5
-            consecutive_disconnects = 0
-            max_disconnect_retries = 3
+        print("[Background] Starting progressive job fetch...")
+        all_jobs = []
+        consecutive_429_errors = 0
+        max_429_retries = 5
+        
+        try:
+            token = await self.get_auth_token()
             
-            try:
-                token = await self.get_auth_token()
+            async with httpx.AsyncClient() as client:
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
                 
-                async with httpx.AsyncClient() as client:
-                    headers = {
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json"
-                    }
+                page = 1
+                has_next = True
+                total_records = 0
+                
+                while has_next:
+                    url = f"{self.reports_url}?response_type=1&page={page}"
+                    print(f"[Background] Fetching page {page}...")
                     
-                    page = 1
-                    has_next = True
-                    total_records = 0
-                    
-                    while has_next:
-                        url = f"{self.reports_url}?response_type=1&page={page}"
-                        print(f"[Background] Fetching page {page}...")
+                    try:
+                        response = await client.get(url, headers=headers, timeout=60.0)
+                        response.raise_for_status()
+                        consecutive_429_errors = 0  # Reset on success
                         
-                        try:
-                            response = await client.get(url, headers=headers, timeout=60.0)
-                            response.raise_for_status()
-                            consecutive_429_errors = 0  # Reset on success
-                            consecutive_disconnects = 0  # Reset on success
-                            
-                        except httpx.HTTPStatusError as e:
-                            if e.response.status_code == 429:
-                                consecutive_429_errors += 1
-                                if consecutive_429_errors > max_429_retries:
-                                    print(f"[Background] Too many 429 errors, stopping. Got {len(all_jobs)} jobs.")
-                                    break
-                                
-                                # Exponential backoff: 2^errors seconds (2, 4, 8, 16, 32...)
-                                wait_time = min(2 ** consecutive_429_errors, 60)
-                                print(f"[Background] Rate limited (429). Waiting {wait_time}s before retry...")
-                                await asyncio.sleep(wait_time)
-                                continue  # Retry same page
-                            else:
-                                raise  # Re-raise other errors
-                        
-                        except (httpx.RemoteProtocolError, httpx.ConnectError) as e:
-                            # Server disconnection
-                            consecutive_disconnects += 1
-                            if consecutive_disconnects > max_disconnect_retries:
-                                print(f"[Background] Too many disconnections, stopping. Got {len(all_jobs)} jobs.")
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 429:
+                            consecutive_429_errors += 1
+                            if consecutive_429_errors > max_429_retries:
+                                print(f"[Background] Too many 429 errors, stopping. Got {len(all_jobs)} jobs.")
                                 break
                             
-                            wait_time = min(2 ** consecutive_disconnects, 30)
-                            print(f"[Background] Server disconnected. Waiting {wait_time}s before retry...")
+                            # Exponential backoff: 2^errors seconds (2, 4, 8, 16, 32...)
+                            wait_time = min(2 ** consecutive_429_errors, 60)
+                            print(f"[Background] Rate limited (429). Waiting {wait_time}s before retry...")
                             await asyncio.sleep(wait_time)
                             continue  # Retry same page
+                        else:
+                            raise  # Re-raise other errors
                     
                     reports_data = response.json()
                     
@@ -1106,11 +1089,11 @@ class CeipalClient:
                 self._last_total_records = total_records
                 print(f"[Background] Completed fetching {len(all_jobs)} jobs from {page-1} pages")
                 
-            except Exception as e:
-                print(f"[Background] Error fetching jobs: {e}")
-                # Save whatever we got
-                if all_jobs:
-                    self._set_cached_jobs(all_jobs)
+        except Exception as e:
+            print(f"[Background] Error fetching jobs: {e}")
+            # Save whatever we got
+            if all_jobs:
+                self._set_cached_jobs(all_jobs)
     
     async def fetch_more_jobs(self, start_page: int, max_pages: int = 25) -> List[Job]:
         """Fetch additional pages of jobs beyond initial load"""
@@ -1400,17 +1383,11 @@ async def get_jobs(background_tasks: BackgroundTasks, current_user: UserDB = Dep
         cached_jobs = ceipal_client._get_cached_jobs() or ceipal_client._jobs_cache or []
         
         # Trigger background refresh if cache is empty or older than 5 minutes
-        cache_time = ceipal_client._jobs_cache_time
-        if not cached_jobs or cache_time is None:
-            # No cache at all - trigger fetch
+        cache_age = datetime.now() - (ceipal_client._jobs_cache_time or datetime.min)
+        if not cached_jobs or cache_age > timedelta(minutes=5):
+            # Trigger background fetch without waiting (progressive loading)
             background_tasks.add_task(ceipal_client.fetch_all_jobs_background)
-            print(f"[API] Triggered background job fetch (no cache). Current: {len(cached_jobs)} jobs")
-        else:
-            cache_age = datetime.now() - cache_time
-            if cache_age > timedelta(minutes=5):
-                # Cache is stale - trigger fetch
-                background_tasks.add_task(ceipal_client.fetch_all_jobs_background)
-                print(f"[API] Triggered background job fetch (cache stale: {cache_age.seconds}s). Current: {len(cached_jobs)} jobs")
+            print(f"[API] Triggered background job fetch. Current cache: {len(cached_jobs)} jobs")
         
         # Calculate pagination info
         total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 0
@@ -1743,26 +1720,21 @@ async def get_admin_dashboard(
     db: Session = Depends(get_db)
 ):
     """Get admin dashboard statistics (admin only)"""
-    import traceback
-    
     # Check if admin
     if current_user.email.lower() != ADMIN_EMAIL.lower():
         raise HTTPException(status_code=403, detail="Only admin can access dashboard")
     
     try:
-        print("[Dashboard] Starting dashboard data fetch...")
-        from sqlalchemy.orm import joinedload
+        from sqlalchemy.orm import joinedload, func
+        from sqlalchemy import desc
         
         # Get total jobs count from cache
         cached_jobs = ceipal_client._get_cached_jobs() or ceipal_client._jobs_cache or []
         total_jobs = len(cached_jobs)
-        print(f"[Dashboard] Total jobs from cache: {total_jobs}")
         
         # Get all candidates with submitter info
-        print("[Dashboard] Querying candidates from database...")
         candidates = db.query(CandidateDB).options(joinedload(CandidateDB.submitted_by)).all()
         total_submissions = len(candidates)
-        print(f"[Dashboard] Total submissions: {total_submissions}")
         
         # Job-wise submission counts
         job_submissions = {}
@@ -1791,7 +1763,7 @@ async def get_admin_dashboard(
                 vendor_stats[vendor_email]["total_submissions"] += 1
                 vendor_stats[vendor_email]["jobs"].add(c.job_title or "Unknown")
         
-        # Convert sets to counts and sort - IMPORTANT: Convert set to list for JSON serialization
+        # Convert sets to counts and sort
         vendor_list = []
         for email, stats in vendor_stats.items():
             vendor_list.append({
@@ -1809,7 +1781,7 @@ async def get_admin_dashboard(
             status = c.status or "submitted"
             status_counts[status] = status_counts.get(status, 0) + 1
         
-        result = {
+        return {
             "total_jobs": total_jobs,
             "total_submissions": total_submissions,
             "job_submissions": [{"job_title": title, "count": count} for title, count in job_submissions_sorted[:20]],
@@ -1817,14 +1789,9 @@ async def get_admin_dashboard(
             "status_breakdown": status_counts,
             "last_updated": datetime.now().isoformat()
         }
-        print("[Dashboard] Data fetch completed successfully")
-        return result
         
     except Exception as e:
-        error_msg = f"Failed to fetch dashboard data: {str(e)}"
-        print(f"[Dashboard ERROR] {error_msg}")
-        print(f"[Dashboard ERROR] Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard data: {str(e)}")
 
 @app.patch("/api/candidates/{candidate_id}/status")
 async def update_candidate_status(

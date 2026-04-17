@@ -708,7 +708,6 @@ function setView(view) {
   els.viewOffers.hidden = view !== 'offers';
   els.viewDeclines.hidden = view !== 'declines';
   els.viewStarts.hidden = view !== 'starts';
-  els.viewDashboard.hidden = view !== 'dashboard';
   els.viewSettings.hidden = view !== 'settings';
 
   if (view === 'auth') {
