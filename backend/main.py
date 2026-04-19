@@ -252,6 +252,48 @@ def save_whitelisted_users():
 # Initial load
 load_whitelisted_users()
 
+# Migrate users from JSON to MongoDB if MongoDB is empty
+def migrate_users_to_mongodb():
+    """Migrate users from local JSON to MongoDB if MongoDB is connected but empty"""
+    global _users
+    if mongodb_enabled and users_collection is not None:
+        # Check if MongoDB has any users
+        mongo_user_count = users_collection.count_documents({})
+        if mongo_user_count == 0:
+            # Check if we have users in JSON file
+            if os.path.exists(USERS_JSON_FILE):
+                try:
+                    with open(USERS_JSON_FILE, "r") as f:
+                        json_users = json.load(f)
+                    if json_users:
+                        # Migrate to MongoDB
+                        for email, user_data in json_users.items():
+                            users_collection.update_one(
+                                {"email": email.lower()},
+                                {"$set": {
+                                    "id": user_data["id"],
+                                    "email": user_data["email"],
+                                    "full_name": user_data["full_name"],
+                                    "hashed_password": user_data["hashed_password"],
+                                    "is_active": user_data["is_active"],
+                                    "created_at": user_data.get("created_at", datetime.now().isoformat())
+                                }},
+                                upsert=True
+                            )
+                        print(f"[Migration] Migrated {len(json_users)} users from JSON to MongoDB")
+                        # Reload users
+                        _users = load_users_from_json()
+                    else:
+                        print("[Migration] JSON file exists but is empty")
+                except Exception as e:
+                    print(f"[Migration] Error migrating users: {e}")
+        else:
+            print(f"[Migration] MongoDB already has {mongo_user_count} users, skipping migration")
+    else:
+        print("[Migration] MongoDB not available, skipping migration")
+
+migrate_users_to_mongodb()
+
 # JSON-based user storage for persistence without disk
 USERS_JSON_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "users.json")
 
