@@ -203,7 +203,7 @@ def load_whitelisted_users():
     WHITELISTED_USERS = set()
     
     # Try MongoDB first
-    if mongodb_enabled and whitelist_collection:
+    if mongodb_enabled and whitelist_collection is not None:
         try:
             for doc in whitelist_collection.find():
                 WHITELISTED_USERS.add(doc["email"].lower())
@@ -227,7 +227,7 @@ def load_whitelisted_users():
 def save_whitelisted_users():
     """Save whitelisted users to MongoDB or fallback to Users file"""
     # Try MongoDB first
-    if mongodb_enabled and whitelist_collection:
+    if mongodb_enabled and whitelist_collection is not None:
         try:
             # Clear and re-insert all emails
             whitelist_collection.delete_many({})
@@ -258,7 +258,7 @@ USERS_JSON_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "users.j
 def load_users_from_json():
     """Load users from MongoDB or fallback to JSON file"""
     # Try MongoDB first
-    if mongodb_enabled and users_collection:
+    if mongodb_enabled and users_collection is not None:
         try:
             users = {}
             for doc in users_collection.find():
@@ -288,7 +288,7 @@ def load_users_from_json():
 def save_users_to_json(users):
     """Save users to MongoDB or fallback to JSON file"""
     # Try MongoDB first
-    if mongodb_enabled and users_collection:
+    if mongodb_enabled and users_collection is not None:
         try:
             # Update each user individually (upsert)
             for email, user_data in users.items():
@@ -1799,7 +1799,7 @@ async def submit_candidate(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{candidate_name.replace(' ', '_')}_{timestamp}.{file_extension}"
         
-        if mongodb_enabled and fs:
+        if mongodb_enabled and fs is not None:
             # Store in GridFS
             resume_file_id = fs.put(
                 content,
@@ -1852,7 +1852,7 @@ async def submit_candidate(
             "candidate_summary": candidate_summary
         }
         
-        if mongodb_enabled and candidates_collection:
+        if mongodb_enabled and candidates_collection is not None:
             candidates_collection.insert_one(candidate_doc)
             print(f"[Submissions] Candidate {candidate_id} stored in MongoDB")
         else:
@@ -1897,7 +1897,7 @@ async def get_candidates_for_job(job_id: str):
     try:
         job_candidates = []
         
-        if mongodb_enabled and candidates_collection:
+        if mongodb_enabled and candidates_collection is not None:
             # Query MongoDB
             cursor = candidates_collection.find({"job_id": job_id})
             for doc in cursor:
@@ -1925,7 +1925,7 @@ async def get_all_candidates(
         candidates = []
         is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
         
-        if mongodb_enabled and candidates_collection:
+        if mongodb_enabled and candidates_collection is not None:
             # Query MongoDB
             if is_admin:
                 cursor = candidates_collection.find()
@@ -1982,7 +1982,7 @@ async def update_candidate_status(
         if status.lower() not in valid_statuses:
             raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
         
-        if mongodb_enabled and candidates_collection:
+        if mongodb_enabled and candidates_collection is not None:
             # Update in MongoDB
             result = candidates_collection.update_one(
                 {"id": candidate_id},
@@ -2023,7 +2023,7 @@ async def download_resume(candidate_id: str):
     try:
         # Find candidate
         candidate = None
-        if mongodb_enabled and candidates_collection:
+        if mongodb_enabled and candidates_collection is not None:
             candidate = candidates_collection.find_one({"id": candidate_id})
         else:
             # Fallback to JSON file
@@ -2041,7 +2041,7 @@ async def download_resume(candidate_id: str):
         
         storage_type = candidate.get("resume_storage_type", "local")
         
-        if storage_type == "gridfs" and mongodb_enabled and fs:
+        if storage_type == "gridfs" and mongodb_enabled and fs is not None:
             # Retrieve from GridFS
             file_id = candidate.get("resume_storage_id")
             if not file_id:
