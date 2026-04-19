@@ -23,7 +23,6 @@ import tempfile
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 from bson.objectid import ObjectId
-from gridfs import GridFS
 
 # Load environment variables
 load_dotenv()
@@ -59,7 +58,8 @@ def init_mongodb():
         candidates_collection = db.candidates
         
         # Initialize GridFS for file storage
-        fs = GridFS(db)
+        import gridfs
+        fs = gridfs.GridFS(db)
         
         # Test connection
         mongo_client.admin.command('ping')
