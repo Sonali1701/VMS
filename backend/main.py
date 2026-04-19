@@ -371,6 +371,12 @@ def seed_admin_user():
     
     # Check if admin already exists
     if admin_email.lower() in _users:
+        existing_user = _users[admin_email.lower()]
+        # Fix is_active if it's boolean instead of string
+        if existing_user.get("is_active") == True:
+            print(f"[Seed] Fixing is_active field for admin user...")
+            existing_user["is_active"] = "true"
+            save_users_to_json(_users)
         print(f"[Seed] Admin user {admin_email} already exists")
         return
     
@@ -383,7 +389,7 @@ def seed_admin_user():
         "email": admin_email,
         "full_name": "System Administrator",
         "hashed_password": hashed_password,
-        "is_active": True,
+        "is_active": "true",
         "created_at": datetime.now().isoformat()
     }
     
