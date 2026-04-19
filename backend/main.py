@@ -249,6 +249,9 @@ def save_whitelisted_users():
         print(f"[Auth] Error saving Users file: {e}")
         return False
 
+# JSON-based user storage for persistence without disk
+USERS_JSON_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "users.json")
+
 # Initial load
 load_whitelisted_users()
 
@@ -331,9 +334,7 @@ def seed_admin_user():
 
 seed_admin_user()
 
-# JSON-based user storage for persistence without disk
-USERS_JSON_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "users.json")
-
+# Users loading function
 def load_users_from_json():
     """Load users from MongoDB or fallback to JSON file"""
     # Try MongoDB first
