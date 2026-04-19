@@ -682,12 +682,16 @@ async def get_current_user(token: str = Depends(HTTPBearer())):
     
     # Load fresh from JSON to ensure we have latest data
     users = load_users_from_json()
-    user = users.get(token_data.email.lower())
+    email_lower = token_data.email.lower()
+    user = users.get(email_lower)
     
     if user is None:
+        print(f"[Auth] User not found for email: {email_lower}, available users: {list(users.keys())}")
         raise credentials_exception
     if user.get("is_active") != "true":
+        print(f"[Auth] User {email_lower} is inactive: {user.get('is_active')}")
         raise HTTPException(status_code=400, detail="Inactive user")
+    print(f"[Auth] User {email_lower} authenticated successfully")
     
     # Return as dict-like object for compatibility
     return type('User', (), {
