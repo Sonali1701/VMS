@@ -23,6 +23,7 @@ import tempfile
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 from bson.objectid import ObjectId
+from gridfs import GridFS
 
 # Load environment variables
 load_dotenv()
@@ -33,16 +34,24 @@ mongo_client = None
 db = None
 users_collection = None
 whitelist_collection = None
+candidates_collection = None
+fs = None
 
 def init_mongodb():
     """Initialize MongoDB connection"""
     global mongo_client, db, users_collection, whitelist_collection, candidates_collection, fs
     
+    print(f"[MongoDB] Checking configuration...")
+    print(f"[MongoDB] MONGODB_URI present: {bool(MONGODB_URI)}")
+    
     if not MONGODB_URI:
-        print("[MongoDB] No MONGODB_URI set, using fallback JSON storage")
+        print("[MongoDB] No MONGODB_URI environment variable set!")
+        print("[MongoDB] Set MONGODB_URI in Render Dashboard → Environment Variables")
+        print("[MongoDB] Using fallback JSON storage (data will be lost on redeploy)")
         return False
     
     try:
+        print(f"[MongoDB] Attempting to connect...")
         mongo_client = MongoClient(MONGODB_URI, server_api=ServerApi('1'))
         db = mongo_client.vms
         users_collection = db.users
@@ -50,7 +59,6 @@ def init_mongodb():
         candidates_collection = db.candidates
         
         # Initialize GridFS for file storage
-        from gridfs import GridFS
         fs = GridFS(db)
         
         # Test connection
