@@ -295,45 +295,6 @@ def migrate_users_to_mongodb():
     else:
         print("[Migration] MongoDB not available, skipping migration")
 
-migrate_users_to_mongodb()
-
-# Seed admin user if no admin exists
-def seed_admin_user():
-    """Create admin@radixsol.com with default password if not exists"""
-    global _users
-    admin_email = "admin@radixsol.com"
-    
-    # Check if admin already exists
-    if admin_email.lower() in _users:
-        print(f"[Seed] Admin user {admin_email} already exists")
-        return
-    
-    # Create admin user with default password
-    default_password = "Admin@123"  # User should change this after first login
-    hashed_password = bcrypt.hashpw(default_password.encode(), bcrypt.gensalt()).decode()
-    
-    admin_user = {
-        "id": str(uuid4()),
-        "email": admin_email,
-        "full_name": "System Administrator",
-        "hashed_password": hashed_password,
-        "is_active": True,
-        "created_at": datetime.now().isoformat()
-    }
-    
-    _users[admin_email.lower()] = admin_user
-    save_users_to_json(_users)
-    
-    # Also add to whitelist
-    global WHITELISTED_USERS
-    WHITELISTED_USERS.add(admin_email.lower())
-    save_whitelisted_users()
-    
-    print(f"[Seed] Created admin user: {admin_email} with password: {default_password}")
-    print(f"[Seed] IMPORTANT: Please change this password after first login!")
-
-seed_admin_user()
-
 # Users loading function
 def load_users_from_json():
     """Load users from MongoDB or fallback to JSON file"""
@@ -398,6 +359,49 @@ def save_users_to_json(users):
     except Exception as e:
         print(f"[Auth] Error saving users JSON: {e}")
         return False
+
+# Initialize users cache
+_users = load_users_from_json()
+
+# Seed admin user if no admin exists
+def seed_admin_user():
+    """Create admin@radixsol.com with default password if not exists"""
+    global _users
+    admin_email = "admin@radixsol.com"
+    
+    # Check if admin already exists
+    if admin_email.lower() in _users:
+        print(f"[Seed] Admin user {admin_email} already exists")
+        return
+    
+    # Create admin user with default password
+    default_password = "Admin@123"  # User should change this after first login
+    hashed_password = bcrypt.hashpw(default_password.encode(), bcrypt.gensalt()).decode()
+    
+    admin_user = {
+        "id": str(uuid4()),
+        "email": admin_email,
+        "full_name": "System Administrator",
+        "hashed_password": hashed_password,
+        "is_active": True,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    _users[admin_email.lower()] = admin_user
+    save_users_to_json(_users)
+    
+    # Also add to whitelist
+    global WHITELISTED_USERS
+    WHITELISTED_USERS.add(admin_email.lower())
+    save_whitelisted_users()
+    
+    print(f"[Seed] Created admin user: {admin_email} with password: {default_password}")
+    print(f"[Seed] IMPORTANT: Please change this password after first login!")
+
+seed_admin_user()
+
+# Migrate users from JSON to MongoDB (run after seeding admin)
+migrate_users_to_mongodb()
 
 # In-memory user cache (loaded from MongoDB/JSON on startup)
 _users_cache = load_users_from_json()
