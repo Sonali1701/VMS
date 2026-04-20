@@ -34,11 +34,13 @@ db = None
 users_collection = None
 whitelist_collection = None
 candidates_collection = None
+notifications_collection = None
+jobs_collection = None
 fs = None
 
 def init_mongodb():
     """Initialize MongoDB connection"""
-    global mongo_client, db, users_collection, whitelist_collection, candidates_collection, fs
+    global mongo_client, db, users_collection, whitelist_collection, candidates_collection, notifications_collection, jobs_collection, fs
     
     print(f"[MongoDB] Checking configuration...")
     print(f"[MongoDB] MONGODB_URI present: {bool(MONGODB_URI)}")
@@ -56,6 +58,8 @@ def init_mongodb():
         users_collection = db.users
         whitelist_collection = db.whitelist
         candidates_collection = db.candidates
+        notifications_collection = db.notifications
+        jobs_collection = db.jobs  # Track job status changes
         
         # Initialize GridFS for file storage
         import gridfs
@@ -192,6 +196,148 @@ def send_submission_notification_email(candidate_data: dict, vendor_info: dict) 
         print(f"[Email] From email: {SENDGRID_FROM_EMAIL}")
         print(f"[Email] To email: {ADMIN_EMAIL}")
         return False
+
+def send_job_closure_notification_email(user_email: str, job_title: str, job_id: str, candidate_count: int) -> bool:
+    """Send job closure notification to vendor who submitted candidates"""
+    if not SENDGRID_API_KEY:
+        print(f"[Email] SendGrid not configured. Cannot send job closure notification.")
+        return False
+    
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        
+        html_content = f'''
+            <h2>Job Closure Notification</h2>
+            <p>We wanted to inform you that a job you submitted candidates for has been <strong>closed</strong>.</p>
+            
+            <h3>Job Details:</h3>
+            <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job Title:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_title}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job ID:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_id}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Your Submissions:</td><td style="padding: 8px; border: 1px solid #ddd;">{candidate_count} candidate(s)</td></tr>
+            </table>
+            
+            <p style="margin-top: 20px;">
+                <a href="{APP_URL}" style="padding: 12px 24px; background: #7c3aed; color: white; text-decoration: none; border-radius: 6px;">View Jobs Dashboard</a>
+            </p>
+            
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                This is an automated notification from the Vendor Management System.<br>
+                For questions, please contact admin@radixsol.com
+            </p>
+        '''
+        
+        message = Mail(
+            from_email=SENDGRID_FROM_EMAIL,
+            to_emails=user_email,
+            subject=f'Job Closed: {job_title}',
+            html_content=html_content
+        )
+        
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(f"[Email] Job closure notification sent to {user_email}, status: {response.status_code}")
+        return response.status_code == 202
+    except Exception as e:
+        print(f"[Email] Error sending job closure notification: {e}")
+        return False
+
+def check_and_notify_job_closures(current_jobs: List[Job]):
+    """Check for jobs that have closed and notify affected users"""
+    global mongodb_enabled, jobs_collection, candidates_collection, notifications_collection
+    
+    if not mongodb_enabled or jobs_collection is None or candidates_collection is None:
+        return
+    
+    try:
+        # Get current active job IDs
+        current_job_ids = {job.id for job in current_jobs}
+        
+        # Get previously stored jobs
+        previous_jobs = {doc["job_id"]: doc for doc in jobs_collection.find()}
+        previous_job_ids = set(previous_jobs.keys())
+        
+        # Find jobs that are no longer active (were in previous, not in current)
+        closed_job_ids = previous_job_ids - current_job_ids
+        
+        for closed_job_id in closed_job_ids:
+            previous_job = previous_jobs[closed_job_id]
+            job_title = previous_job.get("title", "Unknown Job")
+            
+            print(f"[JobTracker] Job {closed_job_id} - '{job_title}' has been closed")
+            
+            # Find all candidates submitted for this job
+            submissions = list(candidates_collection.find({"job_id": closed_job_id}))
+            
+            if not submissions:
+                continue
+            
+            # Group submissions by user
+            user_submissions = {}
+            for sub in submissions:
+                user_email = sub.get("submitted_by_email")
+                if user_email:
+                    if user_email not in user_submissions:
+                        user_submissions[user_email] = []
+                    user_submissions[user_email].append(sub)
+            
+            # Notify each user
+            for user_email, user_subs in user_submissions.items():
+                candidate_count = len(user_subs)
+                
+                # Check if notification already sent
+                existing_notification = notifications_collection.find_one({
+                    "type": "job_closed",
+                    "job_id": closed_job_id,
+                    "user_email": user_email
+                })
+                
+                if existing_notification:
+                    print(f"[JobTracker] Notification already sent to {user_email} for job {closed_job_id}")
+                    continue
+                
+                # Send email notification
+                email_sent = send_job_closure_notification_email(
+                    user_email=user_email,
+                    job_title=job_title,
+                    job_id=closed_job_id,
+                    candidate_count=candidate_count
+                )
+                
+                # Store notification in database
+                notification_doc = {
+                    "id": str(uuid4()),
+                    "type": "job_closed",
+                    "job_id": closed_job_id,
+                    "job_title": job_title,
+                    "user_email": user_email,
+                    "candidate_count": candidate_count,
+                    "email_sent": email_sent,
+                    "created_at": datetime.now().isoformat(),
+                    "read": False
+                }
+                notifications_collection.insert_one(notification_doc)
+                
+                print(f"[JobTracker] Stored notification for {user_email} about job {closed_job_id}")
+        
+        # Update jobs collection with current jobs
+        for job in current_jobs:
+            jobs_collection.update_one(
+                {"job_id": job.id},
+                {"$set": {
+                    "job_id": job.id,
+                    "title": job.title,
+                    "status": job.status,
+                    "updated_at": datetime.now().isoformat()
+                }},
+                upsert=True
+            )
+        
+    except Exception as e:
+        print(f"[JobTracker] Error checking job closures: {e}")
+        import traceback
+        print(f"[JobTracker] Traceback: {traceback.format_exc()}")
 
 # Load whitelisted users from Users file
 WHITELISTED_USERS = set()
@@ -1372,6 +1518,9 @@ class CeipalClient:
                 self._last_total_records = total_records
                 print(f"[Background] Completed fetching {len(all_jobs)} jobs from {page-1} pages")
                 
+                # Check for job closures and notify affected users
+                check_and_notify_job_closures(all_jobs)
+                
         except Exception as e:
             print(f"[Background] Error fetching jobs: {e}")
             # Save whatever we got
@@ -2172,6 +2321,93 @@ async def download_resume(candidate_id: str):
     except Exception as e:
         print(f"[Submissions] Error downloading resume: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download resume: {str(e)}")
+
+@app.get("/api/notifications")
+async def get_user_notifications(
+    current_user: UserDB = Depends(get_current_user),
+    unread_only: bool = False
+):
+    """Get notifications for the current user"""
+    try:
+        if not mongodb_enabled or notifications_collection is None:
+            return {"notifications": [], "unread_count": 0}
+        
+        user_email = current_user.email.lower()
+        
+        # Build query
+        query = {"user_email": user_email}
+        if unread_only:
+            query["read"] = False
+        
+        # Get notifications sorted by date (newest first)
+        notifications = list(notifications_collection.find(query).sort("created_at", -1).limit(50))
+        
+        # Count unread
+        unread_count = notifications_collection.count_documents({
+            "user_email": user_email,
+            "read": False
+        })
+        
+        # Convert ObjectId to string for JSON serialization
+        for n in notifications:
+            n["_id"] = str(n["_id"])
+        
+        return {
+            "notifications": notifications,
+            "unread_count": unread_count,
+            "total_count": len(notifications)
+        }
+    except Exception as e:
+        print(f"[Notifications] Error fetching notifications: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch notifications: {str(e)}")
+
+@app.patch("/api/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    current_user: UserDB = Depends(get_current_user)
+):
+    """Mark a notification as read"""
+    try:
+        if not mongodb_enabled or notifications_collection is None:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        
+        user_email = current_user.email.lower()
+        
+        result = notifications_collection.update_one(
+            {"id": notification_id, "user_email": user_email},
+            {"$set": {"read": True}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        
+        return {"message": "Notification marked as read"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Notifications] Error marking notification as read: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update notification: {str(e)}")
+
+@app.patch("/api/notifications/read-all")
+async def mark_all_notifications_read(
+    current_user: UserDB = Depends(get_current_user)
+):
+    """Mark all notifications as read"""
+    try:
+        if not mongodb_enabled or notifications_collection is None:
+            return {"message": "No notifications to update"}
+        
+        user_email = current_user.email.lower()
+        
+        result = notifications_collection.update_many(
+            {"user_email": user_email, "read": False},
+            {"$set": {"read": True}}
+        )
+        
+        return {"message": f"Marked {result.modified_count} notifications as read"}
+    except Exception as e:
+        print(f"[Notifications] Error marking all notifications as read: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update notifications: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
