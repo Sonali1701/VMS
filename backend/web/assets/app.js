@@ -254,6 +254,14 @@ function logout() {
   currentUser = null;
   localStorage.removeItem('vms_token');
   localStorage.removeItem('vms_user');
+  
+  // Clear search and filter state to prevent leaking to next user
+  if (els.searchInput) els.searchInput.value = '';
+  if (els.statusFilter) els.statusFilter.value = 'all';
+  
+  // Clear jobs data so next user starts fresh
+  allJobs = [];
+  
   updateAuthUI();
 }
 
