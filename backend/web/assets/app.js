@@ -738,7 +738,6 @@ function openJobDetailModal(job) {
   els.jobDetailMeta.textContent = parts.join(' • ') || '—';
   
   els.jobDetailFullDesc.textContent = job.description || 'No description available.';
-  els.jobDetailRequirements.textContent = job.requirements || 'No requirements specified.';
   
   // Show/hide candidates panel based on admin status (only admin sees submitted candidates)
   const candidatesPanel = document.getElementById('jobDetailCandidatesPanel');
@@ -945,7 +944,7 @@ if (els.submitCloseBtn) {
 let jobsPollInterval = null;
 
 async function loadJobs() {
-  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs from Ceipal API...<br><small>Fetching all jobs...</small></div>';
+  els.jobsGrid.innerHTML = '<div class="loading-jobs">Loading jobs...<br><small>Please wait...</small></div>';
   els.jobsEmpty.hidden = true;
   
   // Reset infinite scroll state
