@@ -127,7 +127,7 @@ body {
   color: var(--text);
 }
 
-.topbar__actions { display: flex; gap: 10px; }
+.topbar__actions { display: flex; gap: 10px; position: relative; align-items: center; }
 
 .content { display: flex; flex-direction: column; gap: 14px; }
 
@@ -426,7 +426,7 @@ tbody tr:hover { background: var(--panel-2); }
 /* Notification Panel */
 .notification-panel {
   position: absolute;
-  top: 50px;
+  top: calc(100% + 10px);
   right: 0;
   width: 360px;
   max-height: 400px;
@@ -434,7 +434,7 @@ tbody tr:hover { background: var(--panel-2); }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  z-index: 100;
+  z-index: 1000;
   overflow: hidden;
   display: none;
 }
