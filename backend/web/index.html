@@ -42,6 +42,9 @@
     </aside>
 
     <main class="main">
+      <!-- Toast Container for notifications -->
+      <div class="toast-container" id="toastContainer"></div>
+      
       <header class="topbar">
         <div>
           <h1 class="title" id="pageTitle">Open Hot Jobs</h1>
@@ -49,6 +52,26 @@
           <div id="jobsCount" style="font-size: 14px; color: #7c3aed; font-weight: 600; margin-top: 8px;">Total Jobs: 0</div>
         </div>
         <div class="topbar__actions">
+          <!-- Notification Bell -->
+          <div class="notification-bell" id="notificationBell" hidden>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+            </svg>
+            <span class="notification-badge" id="notificationBadge" hidden>0</span>
+            
+            <!-- Notification Panel Dropdown -->
+            <div class="notification-panel" id="notificationPanel">
+              <div class="notification-header">
+                <h3>Notifications</h3>
+                <button class="btn btn--secondary" id="markAllReadBtn" style="padding: 4px 10px; font-size: 12px;">Mark all read</button>
+              </div>
+              <div class="notification-list" id="notificationList">
+                <div class="notification-empty">No new notifications</div>
+              </div>
+            </div>
+          </div>
+          
           <button class="btn btn--secondary" id="refreshBtn">Refresh Open Hot Jobs</button>
           <!-- Ceipal Cache button hidden for production -->
           <button class="btn" id="ceipalCacheBtn" hidden>Ceipal Cache</button>

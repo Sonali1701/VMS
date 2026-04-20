@@ -224,6 +224,7 @@ function updateAuthUI() {
     els.userName.textContent = currentUser.full_name || currentUser.email;
     els.viewAuth.hidden = true;
     els.viewJobs.hidden = false;
+    updateNotificationUI();
     
     // Submissions tab visible for all users (vendors see their own, admin sees all)
     const submissionsNav = document.querySelector('[data-view="submissions"]');
@@ -1497,6 +1498,182 @@ if (els.addUserBtn) {
 //   }
 // });
 
+// Toast notifications
+function showToast(message, type = 'info', duration = 3000) {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+  
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  
+  const iconSvg = {
+    success: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>',
+    error: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    info: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+  }[type];
+  
+  toast.innerHTML = `${iconSvg}<span>${message}</span>`;
+  container.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.classList.add('hiding');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// Notifications handling
+let notificationsData = { notifications: [], unread_count: 0 };
+
+async function loadNotifications() {
+  if (!authToken || !currentUser) return;
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/notifications`, {
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    
+    if (response.ok) {
+      notificationsData = await response.json();
+      updateNotificationUI();
+    }
+  } catch (err) {
+    console.error('Failed to load notifications:', err);
+  }
+}
+
+function updateNotificationUI() {
+  const bell = document.getElementById('notificationBell');
+  const badge = document.getElementById('notificationBadge');
+  const list = document.getElementById('notificationList');
+  
+  if (!bell) return;
+  
+  // Show/hide based on auth
+  bell.hidden = !authToken || !currentUser;
+  
+  if (!bell.hidden && notificationsData.unread_count > 0) {
+    badge.textContent = notificationsData.unread_count > 9 ? '9+' : notificationsData.unread_count;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+  
+  // Update list
+  if (list) {
+    if (notificationsData.notifications.length === 0) {
+      list.innerHTML = '<div class="notification-empty">No notifications</div>';
+    } else {
+      list.innerHTML = notificationsData.notifications.map(n => `
+        <div class="notification-item ${n.read ? '' : 'unread'}" data-id="${n.id}">
+          <div class="notification-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </div>
+          <div class="notification-content">
+            <div class="notification-title">Job Closed: ${escapeHtml(n.job_title || 'Unknown Job')}</div>
+            <div class="notification-desc">${n.candidate_count} candidate(s) submitted</div>
+            <div class="notification-time">${formatTimeAgo(n.created_at)}</div>
+          </div>
+        </div>
+      `).join('');
+      
+      // Add click handlers
+      list.querySelectorAll('.notification-item').forEach(item => {
+        item.addEventListener('click', () => markNotificationRead(item.dataset.id));
+      });
+    }
+  }
+}
+
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return 'Just now';
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diff = Math.floor((now - date) / 1000);
+  
+  if (diff < 60) return 'Just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+  return `${Math.floor(diff / 86400)} days ago`;
+}
+
+async function markNotificationRead(notificationId) {
+  if (!authToken) return;
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/notifications/${notificationId}/read`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    
+    if (response.ok) {
+      // Update local state
+      const notification = notificationsData.notifications.find(n => n.id === notificationId);
+      if (notification && !notification.read) {
+        notification.read = true;
+        notificationsData.unread_count = Math.max(0, notificationsData.unread_count - 1);
+        updateNotificationUI();
+      }
+    }
+  } catch (err) {
+    console.error('Failed to mark notification as read:', err);
+  }
+}
+
+async function markAllNotificationsRead() {
+  if (!authToken) return;
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/notifications/read-all`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    
+    if (response.ok) {
+      // Update local state
+      notificationsData.notifications.forEach(n => n.read = true);
+      notificationsData.unread_count = 0;
+      updateNotificationUI();
+      showToast('All notifications marked as read', 'success');
+    }
+  } catch (err) {
+    console.error('Failed to mark all notifications as read:', err);
+  }
+}
+
+// Notification bell click handler
+document.addEventListener('DOMContentLoaded', () => {
+  const bell = document.getElementById('notificationBell');
+  const panel = document.getElementById('notificationPanel');
+  const markAllBtn = document.getElementById('markAllReadBtn');
+  
+  if (bell && panel) {
+    bell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.classList.toggle('show');
+      if (panel.classList.contains('show')) {
+        loadNotifications();
+      }
+    });
+    
+    // Close when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!bell.contains(e.target)) {
+        panel.classList.remove('show');
+      }
+    });
+  }
+  
+  if (markAllBtn) {
+    markAllBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      markAllNotificationsRead();
+    });
+  }
+});
+
 // init
 (async function init() {
   updateAuthUI();
@@ -1506,6 +1683,9 @@ if (els.addUserBtn) {
     setView('jobs');
     await loadCeipalStatus();
     await loadJobs();
+    await loadNotifications();
+    // Poll for notifications every minute
+    setInterval(loadNotifications, 60000);
   } else {
     // Not logged in - show auth view
     setView('auth');
