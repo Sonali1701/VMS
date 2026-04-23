@@ -1157,30 +1157,50 @@ def load_excel_jobs() -> List[Job]:
         df = pd.read_excel(EXCEL_JOBS_FILE)
         
         print(f"[Excel] Loaded {len(df)} rows from Excel")
+        print(f"[Excel] Columns found: {list(df.columns)}")
+        
+        # Debug: Print first few rows
+        if len(df) > 0:
+            print(f"[Excel] First row sample: {df.iloc[0].to_dict()}")
+        
+        # Normalize column names (strip spaces, lowercase for matching)
+        col_mapping = {}
+        for col in df.columns:
+            col_mapping[col.strip().lower()] = col
+        
+        def get_val(row, possible_names, default=''):
+            """Get value from row trying multiple possible column names"""
+            for name in possible_names:
+                name_clean = name.strip().lower()
+                if name_clean in col_mapping:
+                    val = row.get(col_mapping[name_clean])
+                    if pd.notna(val):
+                        return str(val).strip()
+            return default
         
         for idx, row in df.iterrows():
             try:
-                # Extract fields from Excel row
-                job_code = str(row.get('Job Code', '')).strip()
-                job_type = str(row.get('Job Type', '')).strip()  # This becomes the job title
-                location = str(row.get('Location', '')).strip()
-                state = str(row.get('State', '')).strip()
-                status = str(row.get('Status', '')).strip()
-                end_client = str(row.get('EndClient', '')).strip()
-                salary = str(row.get('Salary', '')).strip()
-                job_description = str(row.get('Job Description', '')).strip()
+                # Extract fields from Excel row (with flexible column matching)
+                job_code = get_val(row, ['Job Code', 'JobCode', 'Job ID', 'JobID'])
+                job_type = get_val(row, ['Job Type', 'JobType', 'Title', 'Job Title'])
+                location = get_val(row, ['Location', 'City'])
+                state = get_val(row, ['State', 'Province'])
+                status = get_val(row, ['Status', 'Job Status'])
+                end_client = get_val(row, ['EndClient', 'End Client', 'Client', 'EndClient '])
+                salary = get_val(row, ['Salary', 'Pay', 'Rate', 'Bill Rate'])
+                job_description = get_val(row, ['Job Description', 'Description', 'Desc'])
                 
                 # Other fields for description
-                start_date = str(row.get('Start Date', '')).strip()
-                profession = str(row.get('Profession', '')).strip()
-                specialty = str(row.get('Specialty', '')).strip()
-                open_positions = str(row.get('# of Open Positions', '')).strip()
-                total_positions = str(row.get('# of Total Positions', '')).strip()
-                duration_desc = str(row.get('Duration Description', '')).strip()
-                segment_names = str(row.get('Segment Names', '')).strip()
+                start_date = get_val(row, ['Start Date', 'StartDate'])
+                profession = get_val(row, ['Profession', 'Prof'])
+                specialty = get_val(row, ['Specialty', 'Spec'])
+                open_positions = get_val(row, ['# of Open Positions', 'Open Positions', 'Openings'])
+                total_positions = get_val(row, ['# of Total Positions', 'Total Positions'])
+                duration_desc = get_val(row, ['Duration Description', 'Duration'])
+                segment_names = get_val(row, ['Segment Names', 'Segment'])
                 
                 # Skip if no job code (required for ID)
-                if not job_code:
+                if not job_code or job_code.lower() in ['nan', 'none', 'null', '']:
                     continue
                 
                 # Build location (Location + State)
