@@ -731,6 +731,9 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/opt/render/project/src/data/uploads")
 DATA_DIR = os.getenv("DATA_DIR", "/opt/render/project/src/data")
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 10485760))  # 10MB
 
+# Excel Jobs File Configuration
+EXCEL_JOBS_FILE = os.getenv("EXCEL_JOBS_FILE", "VMS Job Fiule.xlsx")
+
 # Ensure directories exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -1131,6 +1134,121 @@ CLIENT_NAMES_TO_FILTER = [
     "Supplemental Healthcare", "TRS Healthcare", "Windsor", "Expedient",
     "Snapcare", "MedicalSolutions", "OHT", "Gracedale"
 ]
+
+def load_excel_jobs() -> List[Job]:
+    """Load jobs from Excel file and convert to Job models.
+    
+    Excel columns expected:
+    Job Code, Location, Job Type, Status, EndClient, Salary, Job Description,
+    Start Date, Profession, Specialty, State, # of Open Positions,
+    # of Total Positions, Duration Description, Segment Names
+    """
+    jobs: List[Job] = []
+    
+    # Check if file exists
+    if not os.path.exists(EXCEL_JOBS_FILE):
+        print(f"[Excel] File not found: {EXCEL_JOBS_FILE}")
+        return jobs
+    
+    try:
+        import pandas as pd
+        
+        print(f"[Excel] Reading jobs from {EXCEL_JOBS_FILE}...")
+        df = pd.read_excel(EXCEL_JOBS_FILE)
+        
+        print(f"[Excel] Loaded {len(df)} rows from Excel")
+        
+        for idx, row in df.iterrows():
+            try:
+                # Extract fields from Excel row
+                job_code = str(row.get('Job Code', '')).strip()
+                job_type = str(row.get('Job Type', '')).strip()  # This becomes the job title
+                location = str(row.get('Location', '')).strip()
+                state = str(row.get('State', '')).strip()
+                status = str(row.get('Status', '')).strip()
+                end_client = str(row.get('EndClient', '')).strip()
+                salary = str(row.get('Salary', '')).strip()
+                job_description = str(row.get('Job Description', '')).strip()
+                
+                # Other fields for description
+                start_date = str(row.get('Start Date', '')).strip()
+                profession = str(row.get('Profession', '')).strip()
+                specialty = str(row.get('Specialty', '')).strip()
+                open_positions = str(row.get('# of Open Positions', '')).strip()
+                total_positions = str(row.get('# of Total Positions', '')).strip()
+                duration_desc = str(row.get('Duration Description', '')).strip()
+                segment_names = str(row.get('Segment Names', '')).strip()
+                
+                # Skip if no job code (required for ID)
+                if not job_code:
+                    continue
+                
+                # Build location (Location + State)
+                full_location = location
+                if state and state.lower() != 'nan':
+                    full_location = f"{location}, {state}" if location else state
+                
+                # Build description
+                description_parts = []
+                
+                # First: Job Description if present
+                if job_description and job_description.lower() != 'nan':
+                    description_parts.append(job_description)
+                
+                # Then: Other details (excluding the main display fields)
+                other_details = []
+                if start_date and start_date.lower() != 'nan':
+                    other_details.append(f"Start Date: {start_date}")
+                if profession and profession.lower() != 'nan':
+                    other_details.append(f"Profession: {profession}")
+                if specialty and specialty.lower() != 'nan':
+                    other_details.append(f"Specialty: {specialty}")
+                if open_positions and open_positions.lower() != 'nan':
+                    other_details.append(f"Open Positions: {open_positions}")
+                if total_positions and total_positions.lower() != 'nan':
+                    other_details.append(f"Total Positions: {total_positions}")
+                if duration_desc and duration_desc.lower() != 'nan':
+                    other_details.append(f"Duration: {duration_desc}")
+                if segment_names and segment_names.lower() != 'nan':
+                    other_details.append(f"Segment: {segment_names}")
+                if end_client and end_client.lower() != 'nan':
+                    other_details.append(f"End Client: {end_client}")
+                
+                if other_details:
+                    if description_parts:
+                        description_parts.append("\n" + " | ".join(other_details))
+                    else:
+                        description_parts.append(" | ".join(other_details))
+                
+                full_description = "\n".join(description_parts) if description_parts else "No description available"
+                
+                # Create Job model
+                job = Job(
+                    id=job_code,
+                    title=job_type if job_type and job_type.lower() != 'nan' else job_code,
+                    description=full_description,
+                    requirements=None,  # Not included in display
+                    department=f"Job Code: {job_code}",
+                    location=full_location if full_location else "Not specified",
+                    employment_type="Contract",  # Default or can be derived
+                    salary_range=salary if salary and salary.lower() != 'nan' else None,
+                    posted_date=datetime.now(),  # Default to now
+                    status=status if status and status.lower() != 'nan' else "Active",
+                    end_client=end_client if end_client and end_client.lower() != 'nan' else None
+                )
+                
+                jobs.append(job)
+                
+            except Exception as e:
+                print(f"[Excel] Error parsing row {idx}: {e}")
+                continue
+        
+        print(f"[Excel] Successfully parsed {len(jobs)} jobs from Excel")
+        
+    except Exception as e:
+        print(f"[Excel] Error reading Excel file: {e}")
+    
+    return jobs
 
 def sanitize_job_description(description: str, is_admin: bool = False) -> str:
     """Remove client names from job description for non-admin users"""
@@ -1806,9 +1924,13 @@ async def root():
 
 @app.get("/api/jobs", response_model=JobListResponse)
 async def get_jobs(background_tasks: BackgroundTasks, current_user: UserDB = Depends(get_current_user)):
-    """Get all active jobs from Ceipal API (uses cache if available for fast response)"""
+    """Get all active jobs from Excel file (first) and Ceipal API (second)"""
     try:
-        # Always return cached jobs immediately for fast response
+        # Load Excel jobs first
+        excel_jobs = load_excel_jobs()
+        print(f"[API] Loaded {len(excel_jobs)} jobs from Excel")
+        
+        # Get Ceipal jobs from cache
         cached_jobs = ceipal_client._get_cached_jobs() or ceipal_client._jobs_cache or []
         
         # Trigger background refresh if cache is empty or older than 5 minutes
@@ -1818,20 +1940,23 @@ async def get_jobs(background_tasks: BackgroundTasks, current_user: UserDB = Dep
             background_tasks.add_task(ceipal_client.fetch_all_jobs_background)
             print(f"[API] Triggered background job fetch. Current cache: {len(cached_jobs)} jobs")
         
-        # Calculate pagination info
+        # Calculate pagination info (based on Ceipal data)
         total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 0
         total_records = getattr(ceipal_client, '_last_total_records', 0)
-        jobs_fetched = len(cached_jobs)
         
-        # Has more if we fetched less than total records available
-        has_more = (jobs_fetched < total_records and total_records > 0) or total_pages == 0
+        # Combine jobs: Excel first, then Ceipal
+        all_jobs = excel_jobs + cached_jobs
+        jobs_fetched = len(all_jobs)
+        
+        # Has more if Ceipal jobs are still loading
+        has_more = (len(cached_jobs) < total_records and total_records > 0) or total_pages == 0
         
         # Check if user is admin for description sanitization
         is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
         
         # Sanitize job descriptions for non-admin users (vendors)
         sanitized_jobs = []
-        for job in cached_jobs:
+        for job in all_jobs:
             job_dict = job.dict() if hasattr(job, 'dict') else job
             if not is_admin and 'description' in job_dict:
                 job_dict['description'] = sanitize_job_description(job_dict['description'], is_admin)
@@ -1848,10 +1973,15 @@ async def get_jobs(background_tasks: BackgroundTasks, current_user: UserDB = Dep
         # If fetch fails, try to return any cached data as fallback
         if ceipal_client._jobs_cache:
             total_pages = ceipal_client._last_fetched_pages if hasattr(ceipal_client, '_last_fetched_pages') else 25
+            
+            # Load Excel jobs even in error case
+            excel_jobs = load_excel_jobs()
+            all_jobs = excel_jobs + ceipal_client._jobs_cache
+            
             # Check if user is admin for fallback too
             is_admin = current_user.email.lower() == ADMIN_EMAIL.lower()
             sanitized_jobs = []
-            for job in ceipal_client._jobs_cache:
+            for job in all_jobs:
                 job_dict = job.dict() if hasattr(job, 'dict') else job
                 if not is_admin and 'description' in job_dict:
                     job_dict['description'] = sanitize_job_description(job_dict['description'], is_admin)

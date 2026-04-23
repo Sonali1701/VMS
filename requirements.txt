@@ -9,6 +9,7 @@ aiofiles
 httpx
 python-dotenv
 pandas
+openpyxl>=3.0.0
 plotly
 jinja2
 bcrypt>=4.0.0
