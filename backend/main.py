@@ -209,17 +209,16 @@ def send_job_closure_notification_email(user_email: str, job_title: str, job_id:
         
         html_content = f'''
             <h2>Job Closure Notification</h2>
-            <p>We wanted to inform you that a job you submitted candidates for has been <strong>closed</strong>.</p>
+            <p>We wanted to inform you that the following job has been <strong>closed</strong> and is no longer accepting submissions.</p>
             
             <h3>Job Details:</h3>
             <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
                 <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job Title:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_title}</td></tr>
                 <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job ID:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_id}</td></tr>
-                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Your Submissions:</td><td style="padding: 8px; border: 1px solid #ddd;">{candidate_count} candidate(s)</td></tr>
             </table>
             
             <p style="margin-top: 20px;">
-                <a href="{APP_URL}" style="padding: 12px 24px; background: #7c3aed; color: white; text-decoration: none; border-radius: 6px;">View Jobs Dashboard</a>
+                <a href="{APP_URL}" style="padding: 12px 24px; background: #14b8a6; color: white; text-decoration: none; border-radius: 6px;">View Available Jobs</a>
             </p>
             
             <p style="color: #666; font-size: 12px; margin-top: 30px;">
