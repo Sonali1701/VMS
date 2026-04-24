@@ -244,13 +244,17 @@ def send_job_closure_notification_email(user_email: str, job_title: str, job_id:
         return False
 
 def check_and_notify_job_closures(current_jobs: List[Job]):
-    """Check for jobs that have closed and notify affected users"""
-    global mongodb_enabled, jobs_collection, candidates_collection, notifications_collection
+    """Check for jobs that have closed and notify all whitelisted users"""
+    global mongodb_enabled, jobs_collection, notifications_collection, WHITELISTED_USERS
     
-    if not mongodb_enabled or jobs_collection is None or candidates_collection is None:
+    if not mongodb_enabled or jobs_collection is None:
         return
     
     try:
+        # Ensure whitelisted users are loaded
+        if not WHITELISTED_USERS:
+            load_whitelisted_users()
+        
         # Get current active job IDs
         current_job_ids = {job.id for job in current_jobs}
         
@@ -267,24 +271,13 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
             
             print(f"[JobTracker] Job {closed_job_id} - '{job_title}' has been closed")
             
-            # Find all candidates submitted for this job
-            submissions = list(candidates_collection.find({"job_id": closed_job_id}))
-            
-            if not submissions:
-                continue
-            
-            # Group submissions by user
-            user_submissions = {}
-            for sub in submissions:
-                user_email = sub.get("submitted_by_email")
-                if user_email:
-                    if user_email not in user_submissions:
-                        user_submissions[user_email] = []
-                    user_submissions[user_email].append(sub)
-            
-            # Notify each user
-            for user_email, user_subs in user_submissions.items():
-                candidate_count = len(user_subs)
+            # Notify ALL whitelisted users about this closed job
+            for user_email in WHITELISTED_USERS:
+                user_email = user_email.lower()
+                
+                # Skip admin email (optional - admin may not need notifications)
+                if user_email == ADMIN_EMAIL.lower():
+                    continue
                 
                 # Check if notification already sent
                 existing_notification = notifications_collection.find_one({
@@ -302,7 +295,7 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
                     user_email=user_email,
                     job_title=job_title,
                     job_id=closed_job_id,
-                    candidate_count=candidate_count
+                    candidate_count=0  # No specific candidate count for broadcast
                 )
                 
                 # Store notification in database
@@ -312,14 +305,14 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
                     "job_id": closed_job_id,
                     "job_title": job_title,
                     "user_email": user_email,
-                    "candidate_count": candidate_count,
+                    "candidate_count": 0,
                     "email_sent": email_sent,
                     "created_at": datetime.now().isoformat(),
                     "read": False
                 }
                 notifications_collection.insert_one(notification_doc)
                 
-                print(f"[JobTracker] Stored notification for {user_email} about job {closed_job_id}")
+                print(f"[JobTracker] Notified {user_email} about closed job {closed_job_id}")
         
         # Update jobs collection with current jobs
         for job in current_jobs:
