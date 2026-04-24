@@ -199,6 +199,9 @@ def send_submission_notification_email(candidate_data: dict, vendor_info: dict) 
 
 def send_job_closure_notification_email(user_email: str, job_title: str, job_id: str, candidate_count: int) -> bool:
     """Send job closure notification to vendor who submitted candidates"""
+    print(f"[Email] Attempting to send closure notification to {user_email} for job {job_id}")
+    print(f"[Email] SendGrid API Key present: {bool(SENDGRID_API_KEY)}, From email: {SENDGRID_FROM_EMAIL}")
+    
     if not SENDGRID_API_KEY:
         print(f"[Email] SendGrid not configured. Cannot send job closure notification.")
         return False
@@ -246,23 +249,32 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
     """Check for jobs that have closed and notify all whitelisted users"""
     global mongodb_enabled, jobs_collection, notifications_collection, WHITELISTED_USERS
     
-    if not mongodb_enabled or jobs_collection is None:
+    print(f"[JobTracker] Checking job closures - MongoDB enabled: {mongodb_enabled}, jobs_collection: {jobs_collection is not None}, notifications_collection: {notifications_collection is not None}")
+    
+    if not mongodb_enabled or jobs_collection is None or notifications_collection is None:
+        print("[JobTracker] MongoDB not available, skipping notification check")
         return
     
     try:
         # Ensure whitelisted users are loaded
         if not WHITELISTED_USERS:
+            print("[JobTracker] Loading whitelisted users...")
             load_whitelisted_users()
+        
+        print(f"[JobTracker] Whitelisted users: {len(WHITELISTED_USERS)} users")
         
         # Get current active job IDs
         current_job_ids = {job.id for job in current_jobs}
+        print(f"[JobTracker] Current jobs count: {len(current_job_ids)}")
         
         # Get previously stored jobs
         previous_jobs = {doc["job_id"]: doc for doc in jobs_collection.find()}
         previous_job_ids = set(previous_jobs.keys())
+        print(f"[JobTracker] Previous jobs count: {len(previous_job_ids)}")
         
         # Find jobs that are no longer active (were in previous, not in current)
         closed_job_ids = previous_job_ids - current_job_ids
+        print(f"[JobTracker] Detected {len(closed_job_ids)} closed jobs: {closed_job_ids}")
         
         for closed_job_id in closed_job_ids:
             previous_job = previous_jobs[closed_job_id]
@@ -2491,8 +2503,12 @@ async def get_user_notifications(
         })
         
         # Convert ObjectId to string for JSON serialization
+        # Use 'id' field (not '_id') for frontend compatibility
         for n in notifications:
             n["_id"] = str(n["_id"])
+            # Ensure 'id' field exists (from our stored notification_doc)
+            if "id" not in n:
+                n["id"] = n["_id"]
         
         return {
             "notifications": notifications,
