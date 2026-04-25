@@ -1143,7 +1143,7 @@ CLIENT_NAMES_TO_FILTER = [
 _excel_jobs_cache: Optional[List[Job]] = None
 _excel_jobs_cache_time: Optional[datetime] = None
 
-EXCEL_CACHE_MINUTES = 240  # Cache Excel jobs for 4 hours (240 minutes)
+EXCEL_CACHE_MINUTES = 1440  # Cache Excel jobs for 24 hours (1 day) - Excel jobs are static
 
 def load_excel_jobs() -> List[Job]:
     """Load jobs from Excel file and convert to Job models with caching.
