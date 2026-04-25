@@ -242,7 +242,11 @@ def send_job_closure_notification_email(user_email: str, job_title: str, job_id:
         return False
 
 def check_and_notify_job_closures(current_jobs: List[Job]):
-    """Check for jobs that have closed and notify all whitelisted users"""
+    """Check for jobs that have closed and notify all whitelisted users.
+    
+    Only sends notifications for jobs that have ACTUAL status change to 'Closed' or 'Inactive'.
+    This prevents false notifications due to pagination limits.
+    """
     global mongodb_enabled, jobs_collection, notifications_collection, WHITELISTED_USERS
     
     print(f"[JobTracker] Checking job closures - MongoDB enabled: {mongodb_enabled}, jobs_collection: {jobs_collection is not None}, notifications_collection: {notifications_collection is not None}")
@@ -258,25 +262,58 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
             load_whitelisted_users()
         
         print(f"[JobTracker] Whitelisted users: {len(WHITELISTED_USERS)} users")
+        print(f"[JobTracker] Current jobs count: {len(current_jobs)}")
         
-        # Get current active job IDs
-        current_job_ids = {job.id for job in current_jobs}
-        print(f"[JobTracker] Current jobs count: {len(current_job_ids)}")
+        # Build map of current jobs by ID with their status
+        current_jobs_map = {job.id: job for job in current_jobs}
+        current_job_ids = set(current_jobs_map.keys())
         
         # Get previously stored jobs
         previous_jobs = {doc["job_id"]: doc for doc in jobs_collection.find()}
         previous_job_ids = set(previous_jobs.keys())
         print(f"[JobTracker] Previous jobs count: {len(previous_job_ids)}")
         
-        # Find jobs that are no longer active (were in previous, not in current)
-        closed_job_ids = previous_job_ids - current_job_ids
-        print(f"[JobTracker] Detected {len(closed_job_ids)} closed jobs: {closed_job_ids}")
+        # Find jobs that are ACTUALLY closed (have 'Closed' or 'Inactive' status)
+        # or are missing from current fetch but were previously open (with 24hr grace period)
+        closed_job_ids = set()
+        
+        for job_id in previous_job_ids:
+            prev_job = previous_jobs[job_id]
+            prev_status = prev_job.get("status", "Open")
+            
+            if job_id in current_jobs_map:
+                # Job exists in current fetch - check if status changed to closed
+                current_job = current_jobs_map[job_id]
+                current_status = current_job.status
+                
+                if current_status in ["Closed", "Inactive", "Filled", "On Hold", "Cancelled"]:
+                    if prev_status not in ["Closed", "Inactive", "Filled", "On Hold", "Cancelled"]:
+                        # Status changed from open to closed
+                        closed_job_ids.add(job_id)
+                        print(f"[JobTracker] Job {job_id} status changed from '{prev_status}' to '{current_status}'")
+            else:
+                # Job not in current fetch - might be closed or just not in this fetch
+                # Only mark as closed if it was previously open AND we haven't seen it in 24 hours
+                if prev_status in ["Open", "Active", "Pending"]:
+                    last_seen = prev_job.get("last_seen")
+                    if last_seen:
+                        try:
+                            last_seen_dt = datetime.fromisoformat(last_seen)
+                            hours_missing = (datetime.now() - last_seen_dt).total_seconds() / 3600
+                            if hours_missing > 24:
+                                # Haven't seen this job in 24+ hours, likely closed
+                                closed_job_ids.add(job_id)
+                                print(f"[JobTracker] Job {job_id} missing for {hours_missing:.1f} hours, marking as closed")
+                        except:
+                            pass
+        
+        print(f"[JobTracker] Detected {len(closed_job_ids)} actually closed jobs: {closed_job_ids}")
         
         for closed_job_id in closed_job_ids:
-            previous_job = previous_jobs[closed_job_id]
+            previous_job = previous_jobs.get(closed_job_id, {})
             job_title = previous_job.get("title", "Unknown Job")
             
-            print(f"[JobTracker] Job {closed_job_id} - '{job_title}' has been closed")
+            print(f"[JobTracker] Notifying about closed job: {closed_job_id} - '{job_title}'")
             
             # Notify ALL whitelisted users about this closed job
             for user_email in WHITELISTED_USERS:
@@ -322,6 +359,7 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
                 print(f"[JobTracker] Notified {user_email} about closed job {closed_job_id}")
         
         # Update jobs collection with current jobs
+        current_time = datetime.now().isoformat()
         for job in current_jobs:
             jobs_collection.update_one(
                 {"job_id": job.id},
@@ -329,7 +367,8 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
                     "job_id": job.id,
                     "title": job.title,
                     "status": job.status,
-                    "updated_at": datetime.now().isoformat()
+                    "updated_at": current_time,
+                    "last_seen": current_time
                 }},
                 upsert=True
             )
