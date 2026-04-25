@@ -1139,14 +1139,29 @@ CLIENT_NAMES_TO_FILTER = [
     "Snapcare", "MedicalSolutions", "OHT", "Gracedale"
 ]
 
+# Excel jobs cache
+_excel_jobs_cache: Optional[List[Job]] = None
+_excel_jobs_cache_time: Optional[datetime] = None
+
+EXCEL_CACHE_MINUTES = 30  # Cache Excel jobs for 30 minutes
+
 def load_excel_jobs() -> List[Job]:
-    """Load jobs from Excel file and convert to Job models.
+    """Load jobs from Excel file and convert to Job models with caching.
     
     Excel columns expected:
     Job Code, Location, Job Type, Status, EndClient, Salary, Job Description,
     Start Date, Profession, Specialty, State, # of Open Positions,
     # of Total Positions, Duration Description, Segment Names
     """
+    global _excel_jobs_cache, _excel_jobs_cache_time
+    
+    # Return cached jobs if less than 30 minutes old
+    if _excel_jobs_cache and _excel_jobs_cache_time:
+        age = datetime.now() - _excel_jobs_cache_time
+        if age < timedelta(minutes=EXCEL_CACHE_MINUTES):
+            print(f"[Excel] Using cached jobs ({len(_excel_jobs_cache)} jobs, cached {age.seconds}s ago)")
+            return _excel_jobs_cache
+    
     jobs: List[Job] = []
     
     # Check if file exists
@@ -1158,14 +1173,11 @@ def load_excel_jobs() -> List[Job]:
         import pandas as pd
         
         print(f"[Excel] Reading jobs from {EXCEL_JOBS_FILE}...")
+        
+        # Read only necessary columns to reduce memory
         df = pd.read_excel(EXCEL_JOBS_FILE)
         
         print(f"[Excel] Loaded {len(df)} rows from Excel")
-        print(f"[Excel] Columns found: {list(df.columns)}")
-        
-        # Debug: Print first few rows
-        if len(df) > 0:
-            print(f"[Excel] First row sample: {df.iloc[0].to_dict()}")
         
         # Normalize column names (strip spaces, lowercase for matching)
         col_mapping = {}
@@ -1269,10 +1281,21 @@ def load_excel_jobs() -> List[Job]:
         
         print(f"[Excel] Successfully parsed {len(jobs)} jobs from Excel")
         
+        # Cache the jobs
+        _excel_jobs_cache = jobs
+        _excel_jobs_cache_time = datetime.now()
+        
     except Exception as e:
         print(f"[Excel] Error reading Excel file: {e}")
     
     return jobs
+
+def clear_excel_jobs_cache():
+    """Clear the Excel jobs cache to force reload on next request"""
+    global _excel_jobs_cache, _excel_jobs_cache_time
+    _excel_jobs_cache = None
+    _excel_jobs_cache_time = None
+    print("[Excel] Cache cleared")
 
 def sanitize_job_description(description: str, is_admin: bool = False) -> str:
     """Remove client names from job description for non-admin users"""
@@ -1579,9 +1602,13 @@ class CeipalClient:
             # Last resort: mock jobs
             return self._get_mock_jobs()
     
-    async def fetch_all_jobs_background(self):
-        """Background task to fetch all jobs progressively and update cache"""
-        print("[Background] Starting progressive job fetch...")
+    async def fetch_all_jobs_background(self, max_pages: int = 50):
+        """Background task to fetch all jobs progressively and update cache.
+        
+        Args:
+            max_pages: Maximum pages to fetch in one run (default 50 to prevent memory issues)
+        """
+        print(f"[Background] Starting progressive job fetch (max {max_pages} pages)...")
         all_jobs = []
         consecutive_429_errors = 0
         max_429_retries = 5
@@ -1648,6 +1675,11 @@ class CeipalClient:
                         (has_next_page_val == 1 or has_next_page_val == "1" or has_next_page_val is True) or
                         (next_page_val is not None and int(next_page_val) > page)
                     )
+                    
+                    # Stop if we've reached max pages to prevent memory issues
+                    if page >= max_pages:
+                        print(f"[Background] Reached max pages ({max_pages}), stopping fetch")
+                        has_next = False
                     
                     if has_next:
                         page += 1
