@@ -220,10 +220,6 @@ def send_job_closure_notification_email(user_email: str, job_title: str, job_id:
                 <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job ID:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_id}</td></tr>
             </table>
             
-            <p style="margin-top: 20px;">
-                <a href="{APP_URL}" style="padding: 12px 24px; background: #14b8a6; color: white; text-decoration: none; border-radius: 6px;">View Available Jobs</a>
-            </p>
-            
             <p style="color: #666; font-size: 12px; margin-top: 30px;">
                 This is an automated notification from the Vendor Management System.<br>
                 For questions, please contact admin@radixsol.com
