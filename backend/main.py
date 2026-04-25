@@ -1354,18 +1354,46 @@ class CeipalClient:
         return os.path.join(self.cache_dir, filename)
 
     def _write_json_cache(self, filename: str, payload) -> None:
+        """Write cache to disk atomically using temp file to prevent corruption"""
         try:
-            with open(self._cache_path(filename), "w", encoding="utf-8") as f:
+            cache_path = self._cache_path(filename)
+            temp_path = cache_path + ".tmp"
+            
+            # Write to temp file first
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
-        except Exception as e:
+            
+            # Atomic rename (prevents partial/corrupted files)
+            os.replace(temp_path, cache_path)
+            
             if DEBUG:
-                print(f"Failed to write cache {filename}: {e}")
+                print(f"[Cache] Successfully wrote {filename} ({len(json.dumps(payload))} bytes)")
+                
+        except Exception as e:
+            print(f"[Cache] Failed to write cache {filename}: {e}")
 
     def _read_json_cache(self, filename: str):
+        """Read cache from disk with error handling"""
         try:
-            with open(self._cache_path(filename), "r", encoding="utf-8") as f:
+            cache_path = self._cache_path(filename)
+            
+            # Check if file exists and has content
+            if not os.path.exists(cache_path):
+                return None
+                
+            file_size = os.path.getsize(cache_path)
+            if file_size == 0:
+                return None
+            
+            with open(cache_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+                
+        except json.JSONDecodeError as e:
+            print(f"[Cache] Corrupted cache file {filename}: {e}")
+            return None
+        except Exception as e:
+            if DEBUG:
+                print(f"[Cache] Failed to read cache {filename}: {e}")
             return None
 
     def _extract_authtoken(self, auth_result: dict) -> Optional[str]:
