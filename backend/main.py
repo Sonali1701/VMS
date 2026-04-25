@@ -241,15 +241,24 @@ def send_job_closure_notification_email(user_email: str, job_title: str, job_id:
         print(f"[Email] Error sending job closure notification: {e}")
         return False
 
-def check_and_notify_job_closures(current_jobs: List[Job]):
+def check_and_notify_job_closures(current_jobs: List[Job], source: str = "ceipal"):
     """Check for jobs that have closed and notify all whitelisted users.
     
     Only sends notifications for jobs that have ACTUAL status change to 'Closed' or 'Inactive'.
     This prevents false notifications due to pagination limits.
+    
+    Args:
+        current_jobs: List of current jobs
+        source: Source of jobs ("ceipal" or "excel") - only Ceipal jobs are tracked for closures
     """
     global mongodb_enabled, jobs_collection, notifications_collection, WHITELISTED_USERS
     
-    print(f"[JobTracker] Checking job closures - MongoDB enabled: {mongodb_enabled}, jobs_collection: {jobs_collection is not None}, notifications_collection: {notifications_collection is not None}")
+    # Only track Ceipal jobs for closure notifications
+    if source != "ceipal":
+        print(f"[JobTracker] Skipping closure check for {source} jobs - only Ceipal jobs are tracked")
+        return
+    
+    print(f"[JobTracker] Checking job closures for {source} jobs - MongoDB enabled: {mongodb_enabled}, jobs_collection: {jobs_collection is not None}, notifications_collection: {notifications_collection is not None}")
     
     if not mongodb_enabled or jobs_collection is None or notifications_collection is None:
         print("[JobTracker] MongoDB not available, skipping notification check")
@@ -262,16 +271,16 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
             load_whitelisted_users()
         
         print(f"[JobTracker] Whitelisted users: {len(WHITELISTED_USERS)} users")
-        print(f"[JobTracker] Current jobs count: {len(current_jobs)}")
+        print(f"[JobTracker] Current {source} jobs count: {len(current_jobs)}")
         
         # Build map of current jobs by ID with their status
         current_jobs_map = {job.id: job for job in current_jobs}
         current_job_ids = set(current_jobs_map.keys())
         
-        # Get previously stored jobs
-        previous_jobs = {doc["job_id"]: doc for doc in jobs_collection.find()}
+        # Get previously stored jobs (only Ceipal jobs)
+        previous_jobs = {doc["job_id"]: doc for doc in jobs_collection.find({"source": "ceipal"})}
         previous_job_ids = set(previous_jobs.keys())
-        print(f"[JobTracker] Previous jobs count: {len(previous_job_ids)}")
+        print(f"[JobTracker] Previous Ceipal jobs count: {len(previous_job_ids)}")
         
         # Find jobs that are ACTUALLY closed (have 'Closed' or 'Inactive' status)
         # or are missing from current fetch but were previously open (with 24hr grace period)
@@ -358,7 +367,7 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
                 
                 print(f"[JobTracker] Notified {user_email} about closed job {closed_job_id}")
         
-        # Update jobs collection with current jobs
+        # Update jobs collection with current jobs (only Ceipal jobs are tracked)
         current_time = datetime.now().isoformat()
         for job in current_jobs:
             jobs_collection.update_one(
@@ -367,6 +376,7 @@ def check_and_notify_job_closures(current_jobs: List[Job]):
                     "job_id": job.id,
                     "title": job.title,
                     "status": job.status,
+                    "source": source,
                     "updated_at": current_time,
                     "last_seen": current_time
                 }},
@@ -1765,8 +1775,8 @@ class CeipalClient:
                 self._last_total_records = total_records
                 print(f"[Background] Completed fetching {total_jobs_fetched} jobs from {page-1} pages")
                 
-                # Check for job closures and notify affected users
-                check_and_notify_job_closures(all_jobs_for_cache)
+                # Check for job closures and notify affected users (only Ceipal jobs)
+                check_and_notify_job_closures(all_jobs_for_cache, source="ceipal")
                 
         except Exception as e:
             print(f"[Background] Error fetching jobs: {e}")
