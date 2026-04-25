@@ -1602,16 +1602,17 @@ class CeipalClient:
             # Last resort: mock jobs
             return self._get_mock_jobs()
     
-    async def fetch_all_jobs_background(self, max_pages: int = 50):
-        """Background task to fetch all jobs progressively and update cache.
+    async def fetch_all_jobs_background(self):
+        """Background task to fetch ALL jobs progressively using disk cache to manage memory.
         
-        Args:
-            max_pages: Maximum pages to fetch in one run (default 50 to prevent memory issues)
+        Fetches all pages without limit, saving to disk periodically to prevent memory issues.
         """
-        print(f"[Background] Starting progressive job fetch (max {max_pages} pages)...")
-        all_jobs = []
+        print("[Background] Starting progressive job fetch (all pages)...")
+        all_jobs = []  # In-memory batch
         consecutive_429_errors = 0
         max_429_retries = 5
+        total_jobs_fetched = 0
+        disk_batch = []  # Accumulate all jobs on disk
         
         try:
             token = await self.get_auth_token()
@@ -1639,7 +1640,7 @@ class CeipalClient:
                         if e.response.status_code == 429:
                             consecutive_429_errors += 1
                             if consecutive_429_errors > max_429_retries:
-                                print(f"[Background] Too many 429 errors, stopping. Got {len(all_jobs)} jobs.")
+                                print(f"[Background] Too many 429 errors, stopping. Got {total_jobs_fetched} jobs.")
                                 break
                             
                             # Exponential backoff: 2^errors seconds (2, 4, 8, 16, 32...)
@@ -1659,14 +1660,20 @@ class CeipalClient:
                     # Parse jobs from this page
                     page_jobs = await self._parse_jobs_from_reports(reports_data)
                     all_jobs.extend(page_jobs)
-                    print(f"[Background] Page {page}: fetched {len(page_jobs)} jobs, total so far: {len(all_jobs)}")
+                    total_jobs_fetched += len(page_jobs)
+                    print(f"[Background] Page {page}: fetched {len(page_jobs)} jobs, total so far: {total_jobs_fetched}")
                     
-                    # Update cache progressively every 5 pages or when done
-                    if page % 5 == 0 or not has_next:
-                        self._set_cached_jobs(all_jobs)
+                    # Every 3 pages: save to disk and clear memory
+                    if page % 3 == 0:
+                        # Save current batch to disk
+                        disk_batch.extend([job.dict() for job in all_jobs])
+                        self._write_json_cache("jobs_full_list.json", disk_batch)
+                        self._set_cached_jobs(all_jobs)  # Keep recent for fast API
                         self._last_fetched_pages = page
                         self._last_total_records = total_records
-                        print(f"[Background] Cache updated with {len(all_jobs)} jobs")
+                        print(f"[Background] Saved {len(disk_batch)} jobs to disk, cleared memory batch")
+                        # Clear in-memory list to free memory
+                        all_jobs = []
                     
                     # Check if there's a next page
                     has_next_page_val = reports_data.get("has_next_page")
@@ -1676,30 +1683,39 @@ class CeipalClient:
                         (next_page_val is not None and int(next_page_val) > page)
                     )
                     
-                    # Stop if we've reached max pages to prevent memory issues
-                    if page >= max_pages:
-                        print(f"[Background] Reached max pages ({max_pages}), stopping fetch")
-                        has_next = False
-                    
                     if has_next:
                         page += 1
                         # Longer delay to avoid rate limiting (2 seconds between requests)
                         await asyncio.sleep(2.0)
                 
-                # Final cache update
-                self._set_cached_jobs(all_jobs)
+                # Final save: combine remaining in-memory jobs with disk cache
+                if all_jobs:
+                    disk_batch.extend([job.dict() for job in all_jobs])
+                
+                # Save full list to disk
+                self._write_json_cache("jobs_full_list.json", disk_batch)
+                
+                # Update in-memory cache with all jobs (reload from disk to ensure consistency)
+                all_jobs_for_cache = [Job(**job_data) for job_data in disk_batch]
+                self._set_cached_jobs(all_jobs_for_cache)
                 self._last_fetched_pages = page - 1
                 self._last_total_records = total_records
-                print(f"[Background] Completed fetching {len(all_jobs)} jobs from {page-1} pages")
+                print(f"[Background] Completed fetching {total_jobs_fetched} jobs from {page-1} pages")
                 
                 # Check for job closures and notify affected users
-                check_and_notify_job_closures(all_jobs)
+                check_and_notify_job_closures(all_jobs_for_cache)
                 
         except Exception as e:
             print(f"[Background] Error fetching jobs: {e}")
-            # Save whatever we got
-            if all_jobs:
-                self._set_cached_jobs(all_jobs)
+            import traceback
+            print(f"[Background] Traceback: {traceback.format_exc()}")
+            # Save whatever we got to disk
+            if all_jobs or disk_batch:
+                if all_jobs:
+                    disk_batch.extend([job.dict() for job in all_jobs])
+                self._write_json_cache("jobs_full_list.json", disk_batch)
+                all_jobs_for_cache = [Job(**job_data) for job_data in disk_batch]
+                self._set_cached_jobs(all_jobs_for_cache)
     
     async def fetch_more_jobs(self, start_page: int, max_pages: int = 25) -> List[Job]:
         """Fetch additional pages of jobs beyond initial load"""
