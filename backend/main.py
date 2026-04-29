@@ -1791,12 +1791,19 @@ class CeipalClient:
                         # Clear in-memory list to free memory
                         all_jobs = []
                     
-                    # Check if there's a next page
+                    # Check if there's a next page. Ceipal sometimes sends next_page="" (empty string) on the
+                    # final page, so int(next_page_val) on a non-None falsy value used to crash the loop.
                     has_next_page_val = reports_data.get("has_next_page")
                     next_page_val = reports_data.get("next_page")
+                    next_page_int = None
+                    if next_page_val not in (None, "", False):
+                        try:
+                            next_page_int = int(next_page_val)
+                        except (TypeError, ValueError):
+                            next_page_int = None
                     has_next = (
-                        (has_next_page_val == 1 or has_next_page_val == "1" or has_next_page_val is True) or
-                        (next_page_val is not None and int(next_page_val) > page)
+                        (has_next_page_val in (1, "1", True)) or
+                        (next_page_int is not None and next_page_int > page)
                     )
                     
                     if has_next:
