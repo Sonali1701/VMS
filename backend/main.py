@@ -36,11 +36,13 @@ whitelist_collection = None
 candidates_collection = None
 notifications_collection = None
 jobs_collection = None
+job_status_tracker_collection = None
+closure_audit_collection = None
 fs = None
 
 def init_mongodb():
     """Initialize MongoDB connection"""
-    global mongo_client, db, users_collection, whitelist_collection, candidates_collection, notifications_collection, jobs_collection, fs
+    global mongo_client, db, users_collection, whitelist_collection, candidates_collection, notifications_collection, jobs_collection, job_status_tracker_collection, closure_audit_collection, fs
     
     print(f"[MongoDB] Checking configuration...")
     print(f"[MongoDB] MONGODB_URI present: {bool(MONGODB_URI)}")
@@ -60,6 +62,8 @@ def init_mongodb():
         candidates_collection = db.candidates
         notifications_collection = db.notifications
         jobs_collection = db.jobs  # Track job status changes
+        job_status_tracker_collection = db.job_status_tracker  # Fresh tracker for closure detection (separate from legacy `jobs`)
+        closure_audit_collection = db.closure_audit  # Audit log for detected closures (dry-run + live)
         
         # Initialize GridFS for file storage
         import gridfs
@@ -80,6 +84,11 @@ mongodb_enabled = init_mongodb()
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "noreply@radixsol.com")
 APP_URL = os.getenv("APP_URL", "https://vms-1-xlkv.onrender.com")  # Your Render app URL
+
+# Job closure notification config — defaults to dry-run for safety after the 2000+ false-notification incident.
+# Flip JOB_CLOSURE_NOTIFICATIONS_ENABLED=true on Render only after watching audit logs confirm real transitions.
+JOB_CLOSURE_NOTIFICATIONS_ENABLED = os.getenv("JOB_CLOSURE_NOTIFICATIONS_ENABLED", "false").lower() == "true"
+JOB_CLOSURE_PER_RUN_CAP = int(os.getenv("JOB_CLOSURE_PER_RUN_CAP", "25"))
 
 # In-memory password reset token storage (expires after 1 hour)
 # Structure: {token: {email: str, expires: datetime, used: bool}}
@@ -196,6 +205,221 @@ def send_submission_notification_email(candidate_data: dict, vendor_info: dict) 
         print(f"[Email] From email: {SENDGRID_FROM_EMAIL}")
         print(f"[Email] To email: {ADMIN_EMAIL}")
         return False
+
+# Statuses that count as "open" upstream and "closed" downstream.
+# A genuine closure is any status crossing from OPEN_STATUSES → CLOSED_STATUSES.
+OPEN_STATUSES = {"open", "active"}
+CLOSED_STATUSES = {"closed", "inactive", "filled", "on hold", "cancelled"}
+
+
+def send_job_closure_notification_email(user_email: str, job_title: str, job_id: str) -> bool:
+    """Send a single job-closure notification email via SendGrid."""
+    if not SENDGRID_API_KEY:
+        print(f"[Email] SendGrid not configured — cannot send closure notification to {user_email}")
+        return False
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+
+        html_content = f'''
+            <h2>Job Closure Notification</h2>
+            <p>The following job has been <strong>closed</strong> and is no longer accepting submissions.</p>
+            <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job Title:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_title}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Job ID:</td><td style="padding: 8px; border: 1px solid #ddd;">{job_id}</td></tr>
+            </table>
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                This is an automated notification from the Vendor Management System.<br>
+                For questions, please contact admin@radixsol.com
+            </p>
+        '''
+        message = Mail(
+            from_email=SENDGRID_FROM_EMAIL,
+            to_emails=user_email,
+            subject=f'Job Closed: {job_title}',
+            html_content=html_content,
+        )
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        return response.status_code == 202
+    except Exception as e:
+        print(f"[Email] Error sending closure notification to {user_email}: {e}")
+        return False
+
+
+def extract_ceipal_status_entries(reports_data) -> list:
+    """Extract (job_id, status, title) from a raw Ceipal reports page WITHOUT filtering by status.
+
+    The regular parser drops everything that isn't Open/Active, so closure detection
+    cannot rely on it — it must read JobStatus straight from the raw response.
+    """
+    entries = []
+    if not isinstance(reports_data, dict):
+        return entries
+    result = reports_data.get("result")
+    if not isinstance(result, list):
+        result = reports_data.get("data", reports_data.get("jobs", reports_data.get("records", [])))
+    if not isinstance(result, list):
+        return entries
+    for row in result:
+        if not isinstance(row, dict):
+            continue
+        job_id = row.get("JobCode") or row.get("job_id") or row.get("JobID")
+        status = (row.get("JobStatus") or "").strip()
+        title = (row.get("JobTitle") or "").strip()
+        if job_id and status:
+            entries.append({"job_id": str(job_id), "status": status, "title": title})
+    return entries
+
+
+def _update_status_tracker(current_status_map: dict):
+    """Upsert each job's current status into job_status_tracker for next-run comparison."""
+    if job_status_tracker_collection is None:
+        return
+    now = datetime.now().isoformat()
+    for job_id, info in current_status_map.items():
+        job_status_tracker_collection.update_one(
+            {"job_id": job_id},
+            {"$set": {
+                "job_id": job_id,
+                "status": info.get("status", ""),
+                "title": info.get("title", ""),
+                "updated_at": now,
+            }},
+            upsert=True,
+        )
+    print(f"[ClosureDetector] Updated tracker with {len(current_status_map)} job statuses")
+
+
+def detect_and_notify_closures(current_status_map: dict, fetch_complete: bool):
+    """Detect Open/Active → Closed transitions from a Ceipal fetch and notify whitelisted users.
+
+    Safety design (after the 2000+ false-notification incident):
+      - Only runs on COMPLETE fetches (no rate-limit truncation, all records seen). Partial fetches skip entirely.
+      - Only acts on explicit transitions for jobs present in BOTH previous tracker AND current fetch. Never infers closure from "missing" rows.
+      - Per-run circuit breaker (JOB_CLOSURE_PER_RUN_CAP, default 25): if exceeded, abort + audit + DO NOT update tracker so next run can re-evaluate after the underlying issue is fixed.
+      - Default dry-run: writes to closure_audit only, no emails. Flip JOB_CLOSURE_NOTIFICATIONS_ENABLED=true on Render to go live.
+      - First run with empty tracker fires nothing — just populates baseline.
+      - Per-user dedupe via notifications_collection so retries can't double-send to the same recipient.
+    """
+    global mongodb_enabled, job_status_tracker_collection, notifications_collection, closure_audit_collection, WHITELISTED_USERS
+
+    if not fetch_complete:
+        print("[ClosureDetector] Skipping — fetch was not complete (rate-limited or partial). Tracker NOT updated.")
+        return
+    if not mongodb_enabled or job_status_tracker_collection is None:
+        print("[ClosureDetector] Skipping — MongoDB not available.")
+        return
+    if not current_status_map:
+        print("[ClosureDetector] Skipping — empty status map.")
+        return
+
+    try:
+        prev_docs = {doc["job_id"]: doc for doc in job_status_tracker_collection.find({})}
+        print(f"[ClosureDetector] Tracker has {len(prev_docs)} previous entries; current Ceipal fetch has {len(current_status_map)} jobs.")
+
+        # First-run guard: empty tracker means we have no baseline. Populate and exit without firing.
+        if not prev_docs:
+            print("[ClosureDetector] First run — populating tracker only, no transitions checked.")
+            _update_status_tracker(current_status_map)
+            return
+
+        transitions = []
+        for job_id, curr in current_status_map.items():
+            curr_status = (curr.get("status") or "").strip().lower()
+            if curr_status not in CLOSED_STATUSES:
+                continue
+            prev_doc = prev_docs.get(job_id)
+            if not prev_doc:
+                continue  # job_id absent from previous tracker — not a transition we'll act on
+            prev_status = (prev_doc.get("status") or "").strip().lower()
+            if prev_status in OPEN_STATUSES:
+                transitions.append({
+                    "job_id": job_id,
+                    "title": curr.get("title") or prev_doc.get("title") or "Unknown Job",
+                    "previous_status": prev_doc.get("status"),
+                    "current_status": curr.get("status"),
+                })
+
+        print(f"[ClosureDetector] Detected {len(transitions)} genuine Open/Active → Closed transitions")
+
+        if len(transitions) > JOB_CLOSURE_PER_RUN_CAP:
+            print(f"[ClosureDetector] ABORT — {len(transitions)} closures exceeds cap of {JOB_CLOSURE_PER_RUN_CAP}. No notifications sent. Tracker NOT updated.")
+            if closure_audit_collection is not None:
+                closure_audit_collection.insert_one({
+                    "id": str(uuid4()),
+                    "type": "abort_cap_exceeded",
+                    "detected_count": len(transitions),
+                    "cap": JOB_CLOSURE_PER_RUN_CAP,
+                    "sample_job_ids": [t["job_id"] for t in transitions[:50]],
+                    "detected_at": datetime.now().isoformat(),
+                })
+            return
+
+        if not WHITELISTED_USERS:
+            load_whitelisted_users()
+        recipients = [u.lower() for u in WHITELISTED_USERS if u.lower() != ADMIN_EMAIL.lower()]
+
+        for t in transitions:
+            job_id = t["job_id"]
+            title = t["title"]
+            audit_doc = {
+                "id": str(uuid4()),
+                "type": "closure_detected",
+                "job_id": job_id,
+                "job_title": title,
+                "previous_status": t["previous_status"],
+                "current_status": t["current_status"],
+                "recipients_count": len(recipients),
+                "detected_at": datetime.now().isoformat(),
+                "dry_run": not JOB_CLOSURE_NOTIFICATIONS_ENABLED,
+            }
+
+            if not JOB_CLOSURE_NOTIFICATIONS_ENABLED:
+                print(f"[ClosureDetector] DRY RUN — would notify {len(recipients)} users about closure of {job_id} ('{title}')")
+                if closure_audit_collection is not None:
+                    closure_audit_collection.insert_one(audit_doc)
+                continue
+
+            sent_count = 0
+            for user_email in recipients:
+                if notifications_collection is not None:
+                    existing = notifications_collection.find_one({
+                        "type": "job_closed",
+                        "job_id": job_id,
+                        "user_email": user_email,
+                    })
+                    if existing:
+                        continue
+                email_sent = send_job_closure_notification_email(user_email, title, job_id)
+                if notifications_collection is not None:
+                    notifications_collection.insert_one({
+                        "id": str(uuid4()),
+                        "type": "job_closed",
+                        "job_id": job_id,
+                        "job_title": title,
+                        "user_email": user_email,
+                        "email_sent": email_sent,
+                        "created_at": datetime.now().isoformat(),
+                        "read": False,
+                    })
+                if email_sent:
+                    sent_count += 1
+
+            audit_doc["emails_sent"] = sent_count
+            if closure_audit_collection is not None:
+                closure_audit_collection.insert_one(audit_doc)
+            print(f"[ClosureDetector] Notified {sent_count}/{len(recipients)} users about closure of {job_id}")
+
+        # Update tracker AFTER acting on transitions. Crash mid-batch ⇒ next run re-detects;
+        # per-user dedupe prevents double-sends to recipients who already received the email.
+        _update_status_tracker(current_status_map)
+
+    except Exception as e:
+        import traceback
+        print(f"[ClosureDetector] Error: {e}")
+        print(f"[ClosureDetector] Traceback: {traceback.format_exc()}")
+
 
 # Load whitelisted users from Users file
 WHITELISTED_USERS = set()
@@ -1495,7 +1719,12 @@ class CeipalClient:
         max_429_retries = 5
         total_jobs_fetched = 0
         disk_batch = []  # Accumulate all jobs on disk
-        
+
+        # Status map for closure detection — captures JobStatus from raw response across ALL pages,
+        # before the Open/Active filter applied by _parse_jobs_from_reports.
+        current_status_map: dict = {}
+        fetch_complete = True  # Flips to False on 429-truncation, exceptions, or record-count mismatch.
+
         try:
             token = await self.get_auth_token()
             
@@ -1523,6 +1752,7 @@ class CeipalClient:
                             consecutive_429_errors += 1
                             if consecutive_429_errors > max_429_retries:
                                 print(f"[Background] Too many 429 errors, stopping. Got {total_jobs_fetched} jobs.")
+                                fetch_complete = False
                                 break
                             
                             # Exponential backoff: 2^errors seconds (2, 4, 8, 16, 32...)
@@ -1534,11 +1764,15 @@ class CeipalClient:
                             raise  # Re-raise other errors
                     
                     reports_data = response.json()
-                    
+
                     if page == 1:
                         total_records = int(reports_data.get("record_count", 0))
                         print(f"[Background] Total records available: {total_records}")
-                    
+
+                    # Capture raw JobStatus for ALL jobs on this page (before any filter) for closure detection.
+                    for entry in extract_ceipal_status_entries(reports_data):
+                        current_status_map[entry["job_id"]] = entry
+
                     # Parse jobs from this page
                     page_jobs = await self._parse_jobs_from_reports(reports_data)
                     all_jobs.extend(page_jobs)
@@ -1584,6 +1818,14 @@ class CeipalClient:
                 self._last_total_records = total_records
                 print(f"[Background] Completed fetching {total_jobs_fetched} jobs from {page-1} pages")
 
+                # Strict completeness check: unique-jobs-seen must cover Ceipal's record_count.
+                # Anything less ⇒ partial fetch ⇒ skip closure detection (and don't update tracker).
+                if total_records > 0 and len(current_status_map) < total_records:
+                    fetch_complete = False
+                    print(f"[Background] Fetch incomplete: {len(current_status_map)} unique jobs vs {total_records} expected. Skipping closure detection.")
+
+                detect_and_notify_closures(current_status_map, fetch_complete=fetch_complete)
+
         except Exception as e:
             print(f"[Background] Error fetching jobs: {e}")
             import traceback
@@ -1595,6 +1837,7 @@ class CeipalClient:
                 self._write_json_cache("jobs_full_list.json", disk_batch)
                 all_jobs_for_cache = [Job(**job_data) for job_data in disk_batch]
                 self._set_cached_jobs(all_jobs_for_cache)
+            # Exception path = partial fetch; do NOT run closure detection.
     
     async def fetch_more_jobs(self, start_page: int, max_pages: int = 25) -> List[Job]:
         """Fetch additional pages of jobs beyond initial load"""
